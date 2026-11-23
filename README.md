@@ -4,10 +4,21 @@ App de Android para escuchar música de YouTube **sin anuncios y sin servidor**:
 
 - Búsqueda de **canciones** (catálogo de YouTube Music) o de **vídeos**
 - Solo audio, que sigue sonando **con la pantalla apagada o con la app cerrada**
-- Controles en la notificación, en la pantalla de bloqueo y en los auriculares Bluetooth
+- Controles en la notificación, en la pantalla de bloqueo, en los auriculares Bluetooth y en **Android Auto**
 - Cola de reproducción, aleatorio, repetir (todo/una) y favoritos
 - La cola y la posición se recuperan al volver a abrir la app
 - **Compartir → Musicola** desde la app de YouTube para reproducir ese vídeo
+
+## Android Auto 🚗
+
+En el coche aparecen **Favoritos**, **Recientes** y un botón de **búsqueda**. También funciona por voz: *"Ok Google, pon Bohemian Rhapsody en Musicola"*.
+
+Android Auto oculta las apps que no vienen de Google Play. Para activarla (solo una vez):
+1. En el móvil, abre los **ajustes de Android Auto** (Ajustes → Dispositivos conectados → Android Auto).
+2. Baja hasta **Versión** y tócala **10 veces** seguidas. Acepta el aviso para activar el modo desarrollador.
+3. Menú ⋮ (arriba a la derecha) → **Ajustes de desarrollador** → activa **Fuentes desconocidas**.
+4. Vuelve a los ajustes de Android Auto → **Personalizar menú de aplicaciones** (o "Launcher") y comprueba que Musicola está marcada.
+5. Conecta el móvil al coche. Musicola aparece junto al resto de apps de música.
 
 ## Conseguir el APK con GitHub (sin instalar nada)
 
