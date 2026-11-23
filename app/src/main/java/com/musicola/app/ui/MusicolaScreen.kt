@@ -165,8 +165,8 @@ private fun SearchBar(vm: PlayerViewModel, onSearch: () -> Unit) {
             ),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-            FilterChip(selected = vm.onlySongs, onClick = { vm.setOnlySongs(true) }, label = { Text("Canciones") })
-            FilterChip(selected = !vm.onlySongs, onClick = { vm.setOnlySongs(false) }, label = { Text("Vídeos") })
+            FilterChip(selected = vm.onlySongs, onClick = { vm.chooseOnlySongs(true) }, label = { Text("Canciones") })
+            FilterChip(selected = !vm.onlySongs, onClick = { vm.chooseOnlySongs(false) }, label = { Text("Vídeos") })
         }
     }
 }

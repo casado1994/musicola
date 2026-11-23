@@ -128,7 +128,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setOnlySongs(value: Boolean) {
+    fun chooseOnlySongs(value: Boolean) {
         onlySongs = value
         prefs.edit().putBoolean("onlySongs", value).apply()
         if (query.isNotBlank()) search()
