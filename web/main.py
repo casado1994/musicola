@@ -103,15 +103,51 @@ def _radio_sync(vid: str, n: int) -> list[dict]:
     return []
 
 
-def _resolve_sync(vid: str) -> dict:
-    fast = {"youtube": {"skip": ["hls", "dash", "translated_subs"]}}
-    with yt_dlp.YoutubeDL(_ydl_opts(format=AUDIO_FORMAT, extractor_args=fast)) as ydl:
+# ---- Atajo rápido ----
+# El cliente "visionos" de YouTube no exige resolver el reto JavaScript (lo más lento en el
+# plan gratuito). No admite cookies, así que si YouTube lo bloquea se usa el método normal.
+# Se puede desactivar con la variable FAST_CLIENT=0.
+FAST_CLIENT = os.environ.get("FAST_CLIENT", "1") != "0"
+FAST_CLIENTS = ["visionos"]
+_fast_failures = 0          # fallos seguidos del atajo
+_fast_paused_until = 0.0    # tras varios fallos seguidos, se deja de intentar un rato
+
+
+def _extract_audio(vid: str, use_cookies: bool, clients: list[str] | None) -> dict:
+    yt_args = {"skip": ["hls", "dash", "translated_subs"]}
+    if clients:
+        yt_args["player_client"] = clients
+    opts = _ydl_opts(format=AUDIO_FORMAT, extractor_args={"youtube": yt_args})
+    if not use_cookies:
+        opts.pop("cookiefile", None)
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
     return {
         "url": info["url"],
         "headers": info.get("http_headers") or {},
         "mime": "audio/mp4" if info.get("ext") == "m4a" else f"audio/{info.get('ext', 'webm')}",
     }
+
+
+def _resolve_sync(vid: str) -> dict:
+    global _fast_failures, _fast_paused_until
+    if FAST_CLIENT and time.time() >= _fast_paused_until:
+        t0 = time.time()
+        try:
+            data = _extract_audio(vid, use_cookies=False, clients=FAST_CLIENTS)
+            _fast_failures = 0
+            print(f"[musicola] {vid}: atajo OK en {time.time() - t0:.1f}s", flush=True)
+            return data
+        except Exception as e:
+            _fast_failures += 1
+            msg = str(e).splitlines()[0][:150]
+            print(f"[musicola] {vid}: atajo falló en {time.time() - t0:.1f}s ({msg})", flush=True)
+            if _fast_failures >= 3:
+                _fast_paused_until = time.time() + 30 * 60
+                _fast_failures = 0
+                print("[musicola] atajo en pausa 30 min tras 3 fallos seguidos", flush=True)
+    # Método normal: clientes por defecto de yt-dlp + cookies (si las hay)
+    return _extract_audio(vid, use_cookies=True, clients=None)
 
 
 _inflight: dict[str, asyncio.Future] = {}
@@ -284,7 +320,11 @@ async def _safe_resolve(vid: str):
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "cookies": bool(COOKIE_FILE)}
+    return {
+        "ok": True,
+        "cookies": bool(COOKIE_FILE),
+        "atajo": FAST_CLIENT and time.time() >= _fast_paused_until,
+    }
 
 
 @app.get("/")
