@@ -217,6 +217,9 @@ audio.addEventListener("error", async () => {
     else why = "el navegador no pudo leer el audio";
   } catch (e) { why = "sin conexión con el servidor"; }
   setStatus(`No se pudo reproducir «${t.title}»: ${why}`);
+  if (/not a bot|Sign in/i.test(why)) {
+    $("#status").innerHTML += ' — <a href="/cookies" style="color:var(--accent)">Actualizar cookies</a>';
+  }
   if (++errorStreak < 3 && state.index < state.queue.length - 1) setTimeout(() => next(true), 2500);
 });
 // ---------- Modo radio ----------

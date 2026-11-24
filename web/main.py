@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import httpx
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
@@ -29,23 +29,55 @@ URL_TTL = 60 * 60 * 3  # las URLs de googlevideo caducan a las ~6 h
 # Protección opcional: si defines MUSICOLA_TOKEN, todas las peticiones a /api lo necesitan.
 TOKEN = os.environ.get("MUSICOLA_TOKEN")
 
-# Opcional: cookies de YouTube (formato Netscape/cookies.txt) en la variable YT_COOKIES.
+# ---- Cookies de YouTube (formato Netscape / cookies.txt) ----
 # Ayudan cuando YouTube bloquea la IP del servidor ("Sign in to confirm you're not a bot").
-# También se puede subir como "Secret File" en Render con el nombre cookies.txt
-# (Render lo deja en /etc/secrets/cookies.txt). Se copia a /tmp porque yt-dlp
-# necesita poder reescribir el archivo y /etc/secrets es de solo lectura.
-COOKIE_FILE = None
+# yt-dlp reescribe el archivo con las cookies que YouTube va renovando, así que debe ser
+# un archivo escribible. Si existe la carpeta /data (disco permanente, p. ej. un volumen en
+# Northflank), se guarda ahí y las renovaciones sobreviven a los reinicios.
+# Formas de darlas (de más a menos prioritaria):
+#   1. Página /cookies de la propia web (las guarda en el archivo de trabajo).
+#   2. Archivo ya guardado en /data/cookies.txt de una vez anterior.
+#   3. Secret File "cookies.txt" (Render: /etc/secrets/cookies.txt) o variable YT_COOKIES.
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+PERSISTENT = os.path.isdir(DATA_DIR) and os.access(DATA_DIR, os.W_OK)
+WORK_COOKIES = os.path.join(DATA_DIR, "cookies.txt") if PERSISTENT else "/tmp/yt_cookies.txt"
 _SECRET = "/etc/secrets/cookies.txt"
-_has_secret = os.path.exists(_SECRET) and os.path.getsize(_SECRET) > 0  # un archivo vacío = sin cookies
-if _has_secret or os.environ.get("YT_COOKIES"):
-    COOKIE_FILE = "/tmp/yt_cookies.txt"
-    if _has_secret:
+COOKIE_FILE = None
+
+
+def _looks_like_cookies(text: str) -> bool:
+    return "youtube.com" in text and "\t" in text
+
+
+def _set_cookies(text: str):
+    """Guarda unas cookies nuevas como archivo de trabajo y las activa."""
+    global COOKIE_FILE
+    text = text.replace("\r\n", "\n")
+    if not text.startswith("# Netscape HTTP Cookie File"):
+        text = "# Netscape HTTP Cookie File\n" + text
+    with open(WORK_COOKIES, "w") as f:
+        f.write(text if text.endswith("\n") else text + "\n")
+    COOKIE_FILE = WORK_COOKIES
+
+
+def _init_cookies():
+    global COOKIE_FILE
+    # 2. Ya hay cookies guardadas (y quizá renovadas) en el disco permanente: se usan tal cual
+    if PERSISTENT and os.path.exists(WORK_COOKIES) and os.path.getsize(WORK_COOKIES) > 0:
+        COOKIE_FILE = WORK_COOKIES
+        return
+    # 3. Secret File o variable de entorno: se copian al archivo de trabajo
+    data = ""
+    if os.path.exists(_SECRET) and os.path.getsize(_SECRET) > 0:
         with open(_SECRET) as src:
             data = src.read()
-    else:
+    elif os.environ.get("YT_COOKIES"):
         data = os.environ["YT_COOKIES"].replace("\\n", "\n")
-    with open(COOKIE_FILE, "w") as f:
-        f.write(data)
+    if data.strip():
+        _set_cookies(data)
+
+
+_init_cookies()
 
 
 def _ydl_opts(**extra) -> dict:
@@ -370,6 +402,53 @@ async def _safe_resolve(vid: str):
         pass
 
 
+COOKIES_PAGE = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Musicola · Cookies</title>
+<style>body{font:15px system-ui,sans-serif;background:#0f0f12;color:#ececf1;max-width:720px;margin:0 auto;padding:20px}
+textarea,input{width:100%;box-sizing:border-box;background:#18181d;color:#ececf1;border:1px solid #2a2a31;border-radius:8px;padding:10px;font:12px monospace}
+textarea{height:300px}button{margin-top:12px;background:#ff4d6d;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:15px}
+p{color:#8b8b96}#r{margin-top:12px}a{color:#ff4d6d}</style></head><body>
+<h2>Actualizar cookies de YouTube</h2>
+<p>Exporta las cookies en una ventana de incógnito (extensión «Get cookies.txt LOCALLY»), ciérrala y pega aquí el contenido del archivo.</p>
+<p>Estado actual: <b>__ESTADO__</b></p>
+<input id="t" type="password" placeholder="Contraseña de Musicola"><br><br>
+<textarea id="c" placeholder="# Netscape HTTP Cookie File ..."></textarea>
+<button onclick="enviar()">Guardar cookies</button><div id="r"></div>
+<p><a href="/">← Volver a Musicola</a></p>
+<script>
+document.getElementById("t").value = localStorage.getItem("token") || "";
+async function enviar(){
+  const t=document.getElementById("t").value.trim(), r=document.getElementById("r");
+  const res=await fetch("/api/cookies?t="+encodeURIComponent(t),{method:"POST",headers:{"Content-Type":"text/plain"},body:document.getElementById("c").value});
+  const j=await res.json().catch(()=>({}));
+  r.textContent = res.ok ? "✔ Cookies guardadas. Ya puedes volver a la música." : "Error: "+(j.detail||res.status);
+  if(res.ok){localStorage.setItem("token",t);document.getElementById("c").value="";}
+}
+</script></body></html>"""
+
+
+@app.get("/cookies")
+async def cookies_page():
+    estado = "sin cookies"
+    if COOKIE_FILE:
+        estado = "cookies cargadas" + (" (guardadas en disco permanente)" if PERSISTENT else " (se pierden al reiniciar)")
+    return HTMLResponse(COOKIES_PAGE.replace("__ESTADO__", estado))
+
+
+@app.post("/api/cookies")
+async def upload_cookies(request: Request):
+    if not TOKEN:
+        raise HTTPException(403, "Define MUSICOLA_TOKEN en el servidor para poder subir cookies")
+    text = (await request.body()).decode("utf-8", "replace")
+    if len(text) > 500_000 or not _looks_like_cookies(text):
+        raise HTTPException(400, "Eso no parece un cookies.txt de YouTube")
+    _set_cookies(text)
+    _url_cache.clear()
+    for st in [*STRATEGIES, FALLBACK]:
+        st.failures, st.paused_until = 0, 0.0
+    return {"ok": True, "persistente": PERSISTENT}
+
+
 @app.get("/healthz")
 async def healthz(request: Request):
     pot = None
@@ -383,6 +462,7 @@ async def healthz(request: Request):
         "generador_tokens": pot,
         "ok": True,
         "cookies": bool(COOKIE_FILE),
+        "disco_permanente": PERSISTENT,
         "estrategias": {
             st.name: ("activa" if st.available() else "en pausa" if st.enabled else "desactivada")
             + f" ({st.ok} OK)"
