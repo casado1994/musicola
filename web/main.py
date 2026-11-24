@@ -31,11 +31,20 @@ TOKEN = os.environ.get("MUSICOLA_TOKEN")
 
 # Opcional: cookies de YouTube (formato Netscape/cookies.txt) en la variable YT_COOKIES.
 # Ayudan cuando YouTube bloquea la IP del servidor ("Sign in to confirm you're not a bot").
+# También se puede subir como "Secret File" en Render con el nombre cookies.txt
+# (Render lo deja en /etc/secrets/cookies.txt). Se copia a /tmp porque yt-dlp
+# necesita poder reescribir el archivo y /etc/secrets es de solo lectura.
 COOKIE_FILE = None
-if os.environ.get("YT_COOKIES"):
+_SECRET = "/etc/secrets/cookies.txt"
+if os.path.exists(_SECRET) or os.environ.get("YT_COOKIES"):
     COOKIE_FILE = "/tmp/yt_cookies.txt"
+    if os.path.exists(_SECRET):
+        with open(_SECRET) as src:
+            data = src.read()
+    else:
+        data = os.environ["YT_COOKIES"].replace("\\n", "\n")
     with open(COOKIE_FILE, "w") as f:
-        f.write(os.environ["YT_COOKIES"].replace("\\n", "\n"))
+        f.write(data)
 
 
 def _ydl_opts(**extra) -> dict:
@@ -182,7 +191,7 @@ async def _safe_resolve(vid: str):
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True}
+    return {"ok": True, "cookies": bool(COOKIE_FILE)}
 
 
 @app.get("/")
