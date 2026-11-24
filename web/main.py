@@ -36,9 +36,10 @@ TOKEN = os.environ.get("MUSICOLA_TOKEN")
 # necesita poder reescribir el archivo y /etc/secrets es de solo lectura.
 COOKIE_FILE = None
 _SECRET = "/etc/secrets/cookies.txt"
-if os.path.exists(_SECRET) or os.environ.get("YT_COOKIES"):
+_has_secret = os.path.exists(_SECRET) and os.path.getsize(_SECRET) > 0  # un archivo vacío = sin cookies
+if _has_secret or os.environ.get("YT_COOKIES"):
     COOKIE_FILE = "/tmp/yt_cookies.txt"
-    if os.path.exists(_SECRET):
+    if _has_secret:
         with open(_SECRET) as src:
             data = src.read()
     else:
