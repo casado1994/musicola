@@ -18,11 +18,14 @@ const state = {
   favs: load("favs", []),
   shuffle: load("shuffle", false),
   repeat: load("repeat", "off"), // off | all | one
+  radio: load("radio", false),
+  played: load("played", []), // ids escuchados recientemente (para que la radio no repita)
   results: [],
 };
 const persist = () => {
   save("queue", state.queue); save("index", state.index); save("favs", state.favs);
   save("shuffle", state.shuffle); save("repeat", state.repeat);
+  save("radio", state.radio); save("played", state.played.slice(-300));
 };
 
 // ---------- Utilidades ----------
@@ -45,12 +48,12 @@ function renderList(el, tracks, mode) {
       <img src="${esc(t.thumb)}" alt="" loading="lazy" data-act="play">
       <div class="meta" data-act="play">
         <div class="title">${esc(t.title)}</div>
-        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}</div>
+        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? '<span class="radio-tag">📻 radio</span>' : ""}</div>
       </div>
       <div class="actions">
         ${mode === "queue"
           ? `<button data-act="up" title="Subir">↑</button><button data-act="remove" title="Quitar">✕</button>`
-          : `<button data-act="next" title="Reproducir después">⇥</button><button data-act="add" title="Añadir a la cola">＋</button>`}
+          : `<button data-act="radio" title="Iniciar radio con esta canción">📻</button><button data-act="next" title="Reproducir después">⇥</button><button data-act="add" title="Añadir a la cola">＋</button>`}
         <button data-act="fav" title="Favorito">${isFav(t.id) ? "♥" : "♡"}</button>
       </div>
     </li>`).join("");
@@ -69,6 +72,7 @@ function renderAll() {
   $("#btn-shuffle").classList.toggle("on", state.shuffle);
   $("#btn-repeat").classList.toggle("on", state.repeat !== "off");
   $("#btn-repeat").textContent = state.repeat === "one" ? "↻¹" : "↻";
+  $("#btn-radio").classList.toggle("on", state.radio);
 }
 
 // ---------- Reproducción ----------
@@ -99,6 +103,10 @@ function next(auto = false) {
   } else {
     i = state.index + 1;
     if (i >= state.queue.length) {
+      if (state.radio && current()) {
+        extendRadio(true).then((added) => { if (added) playIndex(state.index + 1); });
+        return;
+      }
       if (state.repeat === "all") i = 0;
       else { if (auto) { audio.pause(); } return; }
     }
@@ -155,7 +163,13 @@ audio.addEventListener("play", () => { if (!loading) $("#btn-play").textContent 
 audio.addEventListener("pause", () => { if (!loading) $("#btn-play").textContent = "▶"; });
 audio.addEventListener("loadstart", () => { if (audio.getAttribute("src")) setLoading(!audio.paused || audio.autoplay); });
 audio.addEventListener("waiting", () => setLoading(true));
-audio.addEventListener("playing", () => { setLoading(false); prefetchNext(); });
+audio.addEventListener("playing", () => {
+  setLoading(false);
+  const t = current();
+  if (t && state.played[state.played.length - 1] !== t.id) { state.played.push(t.id); persist(); }
+  if (state.radio) extendRadio();
+  prefetchNext();
+});
 audio.addEventListener("ended", () => next(true));
 audio.addEventListener("loadedmetadata", () => {
   $("#seek").max = Math.floor(audio.duration || 0);
@@ -185,6 +199,46 @@ audio.addEventListener("error", async () => {
   setStatus(`No se pudo reproducir «${t.title}»: ${why}`);
   if (++errorStreak < 3 && state.index < state.queue.length - 1) setTimeout(() => next(true), 2500);
 });
+// ---------- Modo radio ----------
+let radioBusy = false;
+// Si quedan pocas canciones en la cola, añade canciones parecidas a la que suena
+async function extendRadio(force = false) {
+  const seed = current();
+  const remaining = state.queue.length - state.index - 1;
+  if (!seed || radioBusy || (!force && remaining >= 3)) return 0;
+  radioBusy = true;
+  try {
+    const r = await fetch(withToken(`/api/radio/${seed.id}?n=25`));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+    const inQueue = new Set(state.queue.map((t) => t.id));
+    const recent = new Set(state.played.slice(-40));
+    const similar = (await r.json()).filter((t) => !inQueue.has(t.id));
+    // Prioriza lo no escuchado últimamente; si no hay nada nuevo, acepta repetir
+    let fresh = similar.filter((t) => !recent.has(t.id));
+    if (!fresh.length) fresh = similar;
+    fresh = fresh.slice(0, 10);
+    fresh.forEach((t) => { t.fromRadio = true; });
+    state.queue.push(...fresh);
+    persist(); renderAll();
+    return fresh.length;
+  } catch (e) {
+    setStatus("Radio: no se pudieron cargar canciones parecidas (" + e.message + ")");
+    return 0;
+  } finally { radioBusy = false; }
+}
+function startRadio(track) {
+  state.radio = true;
+  state.queue = [track];
+  playIndex(0);
+  setStatus(`📻 Radio de «${track.title}»`);
+  extendRadio(true);
+}
+$("#btn-radio").onclick = () => {
+  state.radio = !state.radio; persist(); renderAll();
+  setStatus(state.radio ? "📻 Modo radio activado: al acabar la cola sonarán canciones parecidas" : "Modo radio desactivado");
+  if (state.radio && !audio.paused) extendRadio();
+};
+
 // Prepara la siguiente canción en el servidor mientras suena la actual
 function prefetchNext() {
   const n = state.queue[state.index + 1];
@@ -222,6 +276,7 @@ for (const [id, mode] of [["#results", "results"], ["#queue", "queue"], ["#favs"
         else if (mode === "favs") { state.queue = [...state.favs]; playIndex(i); } // reproduce la lista de favoritos
         else playNow(t);
         break;
+      case "radio": startRadio(t); return;
       case "add": state.queue.push(t); break;
       case "next": state.queue.splice(state.index + 1, 0, t); break;
       case "fav": toggleFav(t); return;

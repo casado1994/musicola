@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Image
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.StreamInfo
@@ -19,16 +20,36 @@ object YouTube {
             else YoutubeSearchQueryHandlerFactory.VIDEOS
         )
         val info = SearchInfo.getInfo(service, service.searchQHFactory.fromQuery(query, filter, ""))
-        info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { item ->
-            val id = idFromUrl(item.url) ?: return@mapNotNull null
-            Track(
-                id = id,
-                title = item.name ?: "",
-                artist = item.uploaderName ?: "",
-                thumb = bestThumb(item.thumbnails, id),
-                duration = item.duration.coerceAtLeast(0),
-            )
+        info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { toTrack(it) }
+    }
+
+    /**
+     * Modo radio: canciones parecidas a [id]. Usa el "Mix" de YouTube Music de ese tema,
+     * con el Mix normal y los vídeos relacionados como reserva.
+     */
+    suspend fun radio(id: String, max: Int = 25): List<Track> = withContext(Dispatchers.IO) {
+        for (listId in listOf("RDAMVM$id", "RD$id")) {
+            val items = runCatching {
+                PlaylistInfo.getInfo(service, "https://www.youtube.com/watch?v=$id&list=$listId").relatedItems
+            }.getOrNull() ?: continue
+            val tracks = items.filterIsInstance<StreamInfoItem>().mapNotNull { toTrack(it) }.filter { it.id != id }
+            if (tracks.isNotEmpty()) return@withContext tracks.take(max)
         }
+        runCatching {
+            StreamInfo.getInfo(service, "https://www.youtube.com/watch?v=$id").relatedItems
+                .filterIsInstance<StreamInfoItem>().mapNotNull { toTrack(it) }.filter { it.id != id }
+        }.getOrDefault(emptyList()).take(max)
+    }
+
+    private fun toTrack(item: StreamInfoItem): Track? {
+        val id = idFromUrl(item.url) ?: return null
+        return Track(
+            id = id,
+            title = item.name ?: "",
+            artist = item.uploaderName ?: "",
+            thumb = bestThumb(item.thumbnails, id),
+            duration = item.duration.coerceAtLeast(0),
+        )
     }
 
     /** Para "Compartir" desde la app de YouTube: convierte una URL en una pista. */

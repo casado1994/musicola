@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueuePlayNext
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
@@ -184,6 +185,7 @@ private fun ResultsList(vm: PlayerViewModel) {
     LazyColumn(contentPadding = PaddingValues(8.dp)) {
         itemsIndexed(vm.results, key = { i, t -> "r$i${t.id}" }) { _, t ->
             TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playNow(t) }) {
+                SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
                 SmallAction(Icons.Default.QueuePlayNext, "Reproducir después") { vm.playNext(t) }
                 SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
                 FavAction(vm, t)
@@ -221,6 +223,7 @@ private fun FavsList(vm: PlayerViewModel) {
         LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
             itemsIndexed(vm.favs, key = { _, t -> "f${t.id}" }) { i, t ->
                 TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playList(vm.favs, i) }) {
+                    SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
                     SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
                     FavAction(vm, t)
                 }
@@ -262,15 +265,15 @@ private fun TrackRow(
 
 @Composable
 private fun SmallAction(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-        Icon(icon, desc, tint = Muted, modifier = Modifier.size(22.dp))
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(icon, desc, tint = Muted, modifier = Modifier.size(21.dp))
     }
 }
 
 @Composable
 private fun FavAction(vm: PlayerViewModel, t: Track) {
     val fav = vm.isFav(t.id)
-    IconButton(onClick = { vm.toggleFav(t) }, modifier = Modifier.size(40.dp)) {
+    IconButton(onClick = { vm.toggleFav(t) }, modifier = Modifier.size(36.dp)) {
         Icon(if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Favorito",
             tint = if (fav) Accent else Muted, modifier = Modifier.size(22.dp))
     }
@@ -339,6 +342,9 @@ private fun PlayerBar(vm: PlayerViewModel) {
                 }
             }
             IconButton(onClick = vm::next) { Icon(Icons.Default.SkipNext, "Siguiente", Modifier.size(32.dp)) }
+            IconButton(onClick = vm::toggleRadio) {
+                Icon(Icons.Default.Radio, "Modo radio", tint = if (vm.radio) Accent else Muted)
+            }
             IconButton(onClick = vm::cycleRepeat) {
                 Icon(
                     if (vm.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,

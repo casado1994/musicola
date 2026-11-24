@@ -56,3 +56,7 @@ main { flex: 1; overflow-y: auto; padding-bottom: 180px; }
 .item img { cursor: pointer; }
 #btn-play.loading { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
+
+.icon.radio { filter: grayscale(1); opacity: .55; }
+.icon.radio.on { filter: none; opacity: 1; }
+.radio-tag { font-size: 11px; color: var(--accent); margin-left: 6px; }

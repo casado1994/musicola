@@ -77,6 +77,32 @@ def _search_sync(q: str, n: int) -> list[dict]:
     return out
 
 
+def _radio_sync(vid: str, n: int) -> list[dict]:
+    """Canciones parecidas: el "Mix" de YouTube Music para ese tema (o el Mix normal como reserva)."""
+    for list_id in (f"RDAMVM{vid}", f"RD{vid}"):
+        url = f"https://www.youtube.com/watch?v={vid}&list={list_id}"
+        try:
+            with yt_dlp.YoutubeDL(_ydl_opts(extract_flat=True, noplaylist=False, playlistend=n + 1)) as ydl:
+                res = ydl.extract_info(url, download=False)
+        except yt_dlp.utils.DownloadError:
+            continue
+        out = []
+        for e in res.get("entries") or []:
+            eid = (e or {}).get("id")
+            if not eid or eid == vid or not ID_RE.match(eid):
+                continue
+            out.append({
+                "id": eid,
+                "title": e.get("title") or "Sin título",
+                "channel": e.get("channel") or e.get("uploader") or "",
+                "duration": e.get("duration"),
+                "thumb": f"https://i.ytimg.com/vi/{eid}/mqdefault.jpg",
+            })
+        if out:
+            return out[:n]
+    return []
+
+
 def _resolve_sync(vid: str) -> dict:
     with yt_dlp.YoutubeDL(_ydl_opts(format=AUDIO_FORMAT)) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
@@ -132,6 +158,22 @@ async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Que
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(502, f"Error buscando: {e}") from e
     _search_cache[key] = (time.time() + 600, results)
+    return results
+
+
+_radio_cache: dict[str, tuple[float, list]] = {}
+
+
+@app.get("/api/radio/{vid}")
+async def radio(vid: str, n: int = Query(25, ge=1, le=50)):
+    if not ID_RE.match(vid):
+        raise HTTPException(400, "ID no válido")
+    hit = _radio_cache.get(vid)
+    if hit and hit[0] > time.time():
+        return hit[1][:n]
+    results = await asyncio.to_thread(_radio_sync, vid, n)
+    if results:
+        _radio_cache[vid] = (time.time() + 1800, results)
     return results
 
 

@@ -3,6 +3,7 @@ package com.musicola.app.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import androidx.annotation.OptIn
@@ -56,6 +57,12 @@ class PlaybackService : MediaLibraryService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("musicola", Context.MODE_PRIVATE) }
     private val searchResults = ConcurrentHashMap<String, List<Track>>()
+    private var radioBusy = false
+
+    // Al activar la radio desde la app, se rellena la cola al momento si hace falta
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "radio") session?.player?.let { maybeExtendRadio(it) }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -114,6 +121,10 @@ class PlaybackService : MediaLibraryService() {
                 if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     saveQueue(p)
                 }
+                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) maybeExtendRadio(p)
+                if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) && p.playbackState == Player.STATE_ENDED) {
+                    maybeExtendRadio(p, force = true)
+                }
             }
         })
 
@@ -125,6 +136,8 @@ class PlaybackService : MediaLibraryService() {
         session = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(openApp)
             .build()
+
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -140,6 +153,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         scope.cancel()
         session?.run {
             player.release()
@@ -147,6 +161,39 @@ class PlaybackService : MediaLibraryService() {
         }
         session = null
         super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------- modo radio
+
+    /** Si la radio está activada y quedan pocas canciones, añade canciones parecidas a la actual. */
+    private fun maybeExtendRadio(p: Player, force: Boolean = false) {
+        if (!prefs.getBoolean("radio", false) || radioBusy) return
+        val seed = p.currentMediaItem ?: return
+        val remaining = p.mediaItemCount - p.currentMediaItemIndex - 1
+        if (!force && remaining >= 3) return
+        radioBusy = true
+        scope.launch {
+            try {
+                val inQueue = (0 until p.mediaItemCount).map { p.getMediaItemAt(it).mediaId }.toSet()
+                val recent = recents().take(30).map { it.id }.toSet()
+                val similar = YouTube.radio(seed.mediaId).filter { it.id !in inQueue }
+                // Prioriza lo no escuchado últimamente; si no hay nada nuevo, acepta repetir
+                val fresh = similar.filter { it.id !in recent }.ifEmpty { similar }.take(10)
+                if (fresh.isNotEmpty()) {
+                    val wasEnded = p.playbackState == Player.STATE_ENDED
+                    p.addMediaItems(fresh.map { it.toMediaItem() })
+                    if (wasEnded) {
+                        p.seekToNextMediaItem()
+                        p.prepare()
+                        p.play()
+                    }
+                }
+            } catch (_: Exception) {
+                // sin conexión o YouTube no devolvió nada: se reintentará en la siguiente canción
+            } finally {
+                radioBusy = false
+            }
+        }
     }
 
     // ---------------------------------------------------------------- datos

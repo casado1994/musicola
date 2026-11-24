@@ -50,6 +50,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var duration by mutableLongStateOf(0L)
         private set
 
+    var radio by mutableStateOf(prefs.getBoolean("radio", false))
+        private set
+
     var favs by mutableStateOf(Track.listFromJson(prefs.getString("favs", null)))
         private set
 
@@ -198,6 +201,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 else -> Player.REPEAT_MODE_OFF
             }
         }
+    }
+
+    // ---- Modo radio ----
+    fun toggleRadio() {
+        radio = !radio
+        prefs.edit().putBoolean("radio", radio).apply() // el servicio escucha este cambio
+        message = if (radio) "📻 Radio activada: al acabar la cola sonarán canciones parecidas" else "Radio desactivada"
+    }
+
+    fun startRadio(track: Track) {
+        radio = true
+        prefs.edit().putBoolean("radio", true).apply()
+        playList(listOf(track), 0) // el servicio rellena la cola con canciones parecidas
+        message = "📻 Radio de «${track.title}»"
     }
 
     // ---- Favoritos ----
