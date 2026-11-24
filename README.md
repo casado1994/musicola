@@ -9,6 +9,20 @@ App de Android para escuchar música de YouTube **sin anuncios y sin servidor**:
 - La cola y la posición se recuperan al volver a abrir la app
 - **Compartir → Musicola** desde la app de YouTube para reproducir ese vídeo
 
+## Versión web 🌐
+
+La carpeta `web/` tiene Musicola como página web, para usarla desde cualquier navegador. Para desplegarla gratis en Render:
+
+1. Entra en https://render.com/deploy?repo=https://github.com/casado1994/musicola, regístrate con GitHub y da acceso al repositorio `musicola`.
+2. Render lee `render.yaml` y te pide dos valores:
+   - **MUSICOLA_TOKEN**: la contraseña que pedirá la web. Pon una larga.
+   - **YT_COOKIES**: déjala vacía por ahora.
+3. Pulsa **Deploy**. En unos 5 minutos tendrás una dirección del tipo `https://musicola-xxxx.onrender.com`.
+
+Lo que hay que saber:
+- **Se duerme tras 15 minutos sin uso.** La primera visita después tarda alrededor de un minuto en arrancar.
+- **YouTube a veces bloquea servidores en la nube.** Sale el error *"Sign in to confirm you're not a bot"*. Para evitarlo, exporta las cookies de YouTube de tu navegador en formato `cookies.txt` (con una extensión como "Get cookies.txt LOCALLY") y pega el contenido en la variable `YT_COOKIES` en Render. Usa una cuenta secundaria de Google, no la principal.
+
 ## Android Auto 🚗
 
 En el coche aparecen **Favoritos**, **Recientes** y un botón de **búsqueda**. También funciona por voz: *"Ok Google, pon Bohemian Rhapsody en Musicola"*.

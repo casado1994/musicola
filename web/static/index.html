@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Musicola</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Musicola</h1>
+    <form id="search-form" autocomplete="off">
+      <input id="q" type="search" placeholder="Buscar canción, artista…" enterkeyhint="search">
+    </form>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="results" class="active">Resultados</button>
+    <button data-tab="queue">Cola <span id="queue-count"></span></button>
+    <button data-tab="favs">Favoritos</button>
+  </nav>
+
+  <main>
+    <ul id="results" class="list"></ul>
+    <ul id="queue" class="list hidden"></ul>
+    <ul id="favs" class="list hidden"></ul>
+    <p id="status" class="status"></p>
+  </main>
+
+  <footer id="player">
+    <div class="now">
+      <img id="np-thumb" alt="">
+      <div class="np-text">
+        <div id="np-title">Nada sonando</div>
+        <div id="np-channel"></div>
+      </div>
+      <button id="btn-fav" class="icon" title="Favorito">♡</button>
+    </div>
+    <div class="seek">
+      <span id="t-cur">0:00</span>
+      <input id="seek" type="range" min="0" max="0" step="1" value="0">
+      <span id="t-dur">0:00</span>
+    </div>
+    <div class="controls">
+      <button id="btn-shuffle" class="icon small" title="Aleatorio">⤮</button>
+      <button id="btn-prev" class="icon" title="Anterior">⏮</button>
+      <button id="btn-play" class="icon big" title="Reproducir">▶</button>
+      <button id="btn-next" class="icon" title="Siguiente">⏭</button>
+      <button id="btn-repeat" class="icon small" title="Repetir">↻</button>
+    </div>
+  </footer>
+
+  <audio id="audio" preload="auto"></audio>
+  <script src="/app.js"></script>
+</body>
+</html>

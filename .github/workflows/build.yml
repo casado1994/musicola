@@ -2,6 +2,10 @@ name: Compilar APK
 
 on:
   push:
+    paths-ignore:
+      - "web/**"
+      - "render.yaml"
+      - "**.md"
     branches: [main]
   workflow_dispatch: # botón "Run workflow" en la pestaña Actions
 

@@ -1,0 +1,17 @@
+# Despliegue de la versión web de Musicola en Render (plan gratuito)
+services:
+  - type: web
+    name: musicola
+    runtime: docker
+    plan: free
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    healthCheckPath: /healthz
+    buildFilter:
+      paths:
+        - web/**
+    envVars:
+      - key: MUSICOLA_TOKEN
+        sync: false # Render te la pide al crear el servicio: será la contraseña de la web
+      - key: YT_COOKIES
+        sync: false # opcional: déjala vacía al principio
