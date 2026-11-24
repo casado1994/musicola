@@ -67,7 +67,7 @@ function renderList(el, tracks, mode) {
       <img src="${esc(t.thumb)}" alt="" loading="lazy" data-act="play">
       <div class="meta" data-act="play">
         <div class="title">${esc(t.title)}</div>
-        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? '<span class="radio-tag">${icon("radio")} radio</span>' : ""}</div>
+        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? `<span class="radio-tag">${icon("radio")} radio</span>` : ""}</div>
       </div>
       <div class="actions">
         ${mode === "queue"
