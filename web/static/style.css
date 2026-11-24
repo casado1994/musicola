@@ -52,3 +52,7 @@ main { flex: 1; overflow-y: auto; padding-bottom: 180px; }
 .icon.small.on { color: var(--accent); }
 .icon.big { font-size: 26px; width: 52px; height: 52px; border-radius: 50%; background: var(--text); color: var(--bg); }
 #btn-fav.on { color: var(--accent); }
+
+.item img { cursor: pointer; }
+#btn-play.loading { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }

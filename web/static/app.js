@@ -42,7 +42,7 @@ function renderList(el, tracks, mode) {
   const cur = current();
   el.innerHTML = tracks.map((t, i) => `
     <li class="item ${cur && cur.id === t.id && (mode !== "queue" || i === state.index) ? "playing" : ""}" data-i="${i}">
-      <img src="${esc(t.thumb)}" alt="" loading="lazy">
+      <img src="${esc(t.thumb)}" alt="" loading="lazy" data-act="play">
       <div class="meta" data-act="play">
         <div class="title">${esc(t.title)}</div>
         <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}</div>
@@ -76,8 +76,10 @@ function playIndex(i, autoplay = true) {
   if (i < 0 || i >= state.queue.length) return;
   state.index = i;
   const t = current();
+  // Al restaurar la última canción no se descarga nada hasta pulsar play
+  audio.preload = autoplay ? "auto" : "none";
   audio.src = withToken(`/api/stream/${t.id}`);
-  if (autoplay) audio.play().catch(() => {});
+  if (autoplay) { setLoading(true); audio.play().catch(() => {}); }
   updateMediaSession(t);
   persist(); renderAll();
 }
@@ -109,7 +111,12 @@ function prev() {
 }
 function togglePlay() {
   if (!audio.src && state.queue.length) return playIndex(Math.max(0, state.index));
-  audio.paused ? audio.play().catch(() => {}) : audio.pause();
+  // Si la carga anterior falló, se vuelve a intentar desde cero
+  if (audio.error && state.queue.length) return playIndex(Math.max(0, state.index));
+  if (audio.paused) {
+    if (audio.readyState < 3) setLoading(true); // aún no hay audio cargado: mostrar "cargando"
+    audio.play().catch(() => {});
+  } else audio.pause();
 }
 
 // ---------- Media Session (pantalla de bloqueo, auriculares, teclas multimedia) ----------
@@ -136,8 +143,19 @@ if ("mediaSession" in navigator) {
 
 // ---------- Eventos del audio ----------
 let seeking = false;
-audio.addEventListener("play", () => { $("#btn-play").textContent = "⏸"; });
-audio.addEventListener("pause", () => { $("#btn-play").textContent = "▶"; });
+let loading = false;
+function setLoading(on) {
+  loading = on;
+  $("#btn-play").textContent = on ? "…" : (audio.paused ? "▶" : "⏸");
+  $("#btn-play").classList.toggle("loading", on);
+  const t = current();
+  if (on && t) setStatus(`Cargando «${t.title}»… (la primera vez puede tardar unos segundos)`);
+}
+audio.addEventListener("play", () => { if (!loading) $("#btn-play").textContent = "⏸"; });
+audio.addEventListener("pause", () => { if (!loading) $("#btn-play").textContent = "▶"; });
+audio.addEventListener("loadstart", () => { if (audio.getAttribute("src")) setLoading(!audio.paused || audio.autoplay); });
+audio.addEventListener("waiting", () => setLoading(true));
+audio.addEventListener("playing", () => { setLoading(false); prefetchNext(); });
 audio.addEventListener("ended", () => next(true));
 audio.addEventListener("loadedmetadata", () => {
   $("#seek").max = Math.floor(audio.duration || 0);
@@ -152,11 +170,26 @@ audio.addEventListener("timeupdate", () => {
 });
 let errorStreak = 0;
 audio.addEventListener("playing", () => { errorStreak = 0; setStatus(""); });
-audio.addEventListener("error", () => {
+audio.addEventListener("error", async () => {
+  setLoading(false);
   const t = current();
-  setStatus(`No se pudo reproducir "${t?.title ?? ""}". Saltando…`);
-  if (++errorStreak < 3) setTimeout(() => next(true), 1200);
+  if (!t) return;
+  // Pregunta al servidor el motivo exacto del fallo
+  let why = "";
+  try {
+    const r = await fetch(withToken(`/api/stream/${t.id}`), { headers: { Range: "bytes=0-1" } });
+    if (r.status === 401) why = "contraseña incorrecta";
+    else if (!r.ok) why = (await r.json().catch(() => ({}))).detail || `error ${r.status}`;
+    else why = "el navegador no pudo leer el audio";
+  } catch (e) { why = "sin conexión con el servidor"; }
+  setStatus(`No se pudo reproducir «${t.title}»: ${why}`);
+  if (++errorStreak < 3 && state.index < state.queue.length - 1) setTimeout(() => next(true), 2500);
 });
+// Prepara la siguiente canción en el servidor mientras suena la actual
+function prefetchNext() {
+  const n = state.queue[state.index + 1];
+  if (n) fetch(withToken(`/api/prefetch/${n.id}`)).catch(() => {});
+}
 $("#seek").addEventListener("input", () => { seeking = true; $("#t-cur").textContent = fmt(+$("#seek").value); });
 $("#seek").addEventListener("change", () => { audio.currentTime = +$("#seek").value; seeking = false; });
 

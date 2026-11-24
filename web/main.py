@@ -164,6 +164,22 @@ async def stream(vid: str, request: Request):
     )
 
 
+@app.get("/api/prefetch/{vid}")
+async def prefetch(vid: str):
+    """Resuelve la URL del audio por adelantado (para que la siguiente canción empiece al instante)."""
+    if not ID_RE.match(vid):
+        raise HTTPException(400, "ID no válido")
+    asyncio.create_task(_safe_resolve(vid))
+    return {"ok": True}
+
+
+async def _safe_resolve(vid: str):
+    try:
+        await resolve(vid)
+    except Exception:
+        pass
+
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
