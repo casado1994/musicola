@@ -170,15 +170,28 @@ async def resolve(vid: str, force: bool = False) -> dict:
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(502, f"No se pudo obtener el audio: {e}") from e
     _url_cache[vid] = (time.time() + URL_TTL, data)
+    _trim(_url_cache, 300)
     return data
 
 
+def _trim(cache: dict, max_items: int):
+    """Evita que las cachés crezcan sin límite (borra las entradas más antiguas)."""
+    while len(cache) > max_items:
+        cache.pop(next(iter(cache)))
+
+
+# Solo una extracción a la vez: cada una puede arrancar Deno (JavaScript), que consume
+# mucha memoria, y el plan gratuito de Render solo tiene 512 MB.
+_extract_lock = asyncio.Semaphore(1)
+
+
 async def _resolve_timed(vid: str) -> dict:
-    t0 = time.time()
-    try:
-        return await asyncio.to_thread(_resolve_sync, vid)
-    finally:
-        print(f"[musicola] {vid} resuelto en {time.time() - t0:.1f}s", flush=True)
+    async with _extract_lock:
+        t0 = time.time()
+        try:
+            return await asyncio.to_thread(_resolve_sync, vid)
+        finally:
+            print(f"[musicola] {vid} resuelto en {time.time() - t0:.1f}s", flush=True)
 
 
 # ---------- App ----------
@@ -245,6 +258,7 @@ async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Que
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(502, f"Error buscando: {e}") from e
     _search_cache[key] = (time.time() + 600, results)
+    _trim(_search_cache, 100)
     return results
 
 
@@ -261,6 +275,7 @@ async def radio(vid: str, n: int = Query(25, ge=1, le=50)):
     results = await asyncio.to_thread(_radio_sync, vid, n)
     if results:
         _radio_cache[vid] = (time.time() + 1800, results)
+        _trim(_radio_cache, 100)
     return results
 
 
@@ -307,6 +322,11 @@ async def prefetch(vid: str):
     """Resuelve la URL del audio por adelantado (para que la siguiente canción empiece al instante)."""
     if not ID_RE.match(vid):
         raise HTTPException(400, "ID no válido")
+    # La precarga nunca compite con lo que el usuario está escuchando:
+    # si ya hay una extracción en marcha (o ya está en caché), no hace nada.
+    hit = _url_cache.get(vid)
+    if (hit and hit[0] > time.time()) or vid in _inflight or _extract_lock.locked():
+        return {"ok": True, "skipped": True}
     asyncio.create_task(_safe_resolve(vid))
     return {"ok": True}
 
@@ -324,7 +344,16 @@ async def healthz():
         "ok": True,
         "cookies": bool(COOKIE_FILE),
         "atajo": FAST_CLIENT and time.time() >= _fast_paused_until,
+        "memoria_mb": _mem_mb(),
     }
+
+
+def _mem_mb():
+    try:
+        with open("/sys/fs/cgroup/memory.current") as f:  # memoria total del contenedor
+            return round(int(f.read()) / 1048576)
+    except Exception:
+        return None
 
 
 @app.get("/")

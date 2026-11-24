@@ -262,7 +262,9 @@ $("#btn-radio").onclick = () => {
 // Prepara la siguiente canción en el servidor mientras suena la actual
 function prefetchNext() {
   // Las dos siguientes de la cola
-  for (const n of state.queue.slice(state.index + 1, state.index + 3)) prefetch(n.id);
+  // Solo la siguiente: el servidor gratuito tiene poca memoria
+  const n = state.queue[state.index + 1];
+  if (n) prefetch(n.id);
 }
 const prefetched = new Set();
 function prefetch(id) {
@@ -369,7 +371,6 @@ $("#search-form").addEventListener("submit", async (e) => {
     }
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     state.results = await r.json();
-    if (state.results[0] && audio.paused) prefetch(state.results[0].id);
     setStatus(state.results.length ? "" : "Sin resultados.");
   } catch (err) { setStatus("Error: " + err.message); }
   renderAll();
