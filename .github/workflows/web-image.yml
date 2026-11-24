@@ -31,3 +31,16 @@ jobs:
           tags: ghcr.io/casado1994/musicola-web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Comprueba que la imagen arranca y que el generador de tokens responde
+  smoke-test:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Arrancar la imagen y consultar /healthz
+        run: |
+          docker run -d --name m -p 8000:8000 ghcr.io/casado1994/musicola-web:latest
+          for i in $(seq 1 30); do curl -fsS localhost:8000/healthz && break; sleep 2; done
+          echo
+          curl -fsS localhost:8000/healthz | tee h.json
+          grep -q '"generador_tokens":true' h.json || { docker logs m; exit 1; }

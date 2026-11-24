@@ -104,23 +104,47 @@ def _radio_sync(vid: str, n: int) -> list[dict]:
     return []
 
 
-# ---- Atajo rápido ----
-# El cliente "visionos" de YouTube no exige resolver el reto JavaScript (lo más lento en el
-# plan gratuito). No admite cookies, así que si YouTube lo bloquea se usa el método normal.
-# Se puede desactivar con la variable FAST_CLIENT=0.
-# Por defecto solo se usa si NO hay cookies: si las hay es porque YouTube bloquea la IP
-# del servidor, y en ese caso también bloquea el atajo (solo haría perder tiempo).
+# ---- Estrategias para obtener el audio ----
+# Se prueban en orden; la primera que funciona gana. Si una falla 3 veces seguidas,
+# se salta durante 30 minutos para no hacer esperar en balde.
+#
+#  1. "token": cliente mweb + PO Token generado por bgutil-pot (servidor local en Rust,
+#     arrancado por start.sh). Pensado para saltarse "Sign in to confirm you're not a bot"
+#     SIN cookies. Se desactiva con POT=0.
+#  2. "atajo": cliente visionos, sin reto JavaScript ni cookies (rápido, pero YouTube suele
+#     bloquearlo desde centros de datos). Por defecto solo si no hay cookies. FAST_CLIENT=0/1.
+#  3. "cookies": clientes por defecto de yt-dlp con las cookies (si las hay). Siempre al final.
+POT_URL = "http://127.0.0.1:4416"
+POT_ENABLED = os.environ.get("POT", "1") != "0" and os.path.exists("/usr/local/bin/bgutil-pot")
 FAST_CLIENT = os.environ.get("FAST_CLIENT", "0" if COOKIE_FILE else "1") != "0"
-FAST_CLIENTS = ["visionos"]
-_fast_failures = 0          # fallos seguidos del atajo
-_fast_paused_until = 0.0    # tras varios fallos seguidos, se deja de intentar un rato
+
+
+class Strategy:
+    def __init__(self, name: str, use_cookies: bool, clients: list[str] | None, enabled: bool):
+        self.name, self.use_cookies, self.clients, self.enabled = name, use_cookies, clients, enabled
+        self.failures = 0
+        self.paused_until = 0.0
+        self.ok = 0
+
+    def available(self) -> bool:
+        return self.enabled and time.time() >= self.paused_until
+
+
+STRATEGIES = [
+    Strategy("token", use_cookies=False, clients=["mweb"], enabled=POT_ENABLED),
+    Strategy("atajo", use_cookies=False, clients=["visionos"], enabled=FAST_CLIENT),
+]
+FALLBACK = Strategy("cookies", use_cookies=True, clients=None, enabled=True)
 
 
 def _extract_audio(vid: str, use_cookies: bool, clients: list[str] | None) -> dict:
     yt_args = {"skip": ["hls", "dash", "translated_subs"]}
     if clients:
         yt_args["player_client"] = clients
-    opts = _ydl_opts(format=AUDIO_FORMAT, extractor_args={"youtube": yt_args})
+    extractor_args = {"youtube": yt_args}
+    if POT_ENABLED:
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [POT_URL]}
+    opts = _ydl_opts(format=AUDIO_FORMAT, extractor_args=extractor_args)
     if not use_cookies:
         opts.pop("cookiefile", None)
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -133,24 +157,29 @@ def _extract_audio(vid: str, use_cookies: bool, clients: list[str] | None) -> di
 
 
 def _resolve_sync(vid: str) -> dict:
-    global _fast_failures, _fast_paused_until
-    if FAST_CLIENT and time.time() >= _fast_paused_until:
+    for st in STRATEGIES:
+        if not st.available():
+            continue
         t0 = time.time()
         try:
-            data = _extract_audio(vid, use_cookies=False, clients=FAST_CLIENTS)
-            _fast_failures = 0
-            print(f"[musicola] {vid}: atajo OK en {time.time() - t0:.1f}s", flush=True)
+            data = _extract_audio(vid, st.use_cookies, st.clients)
+            st.failures = 0
+            st.ok += 1
+            print(f"[musicola] {vid}: '{st.name}' OK en {time.time() - t0:.1f}s", flush=True)
             return data
         except Exception as e:
-            _fast_failures += 1
+            st.failures += 1
             msg = str(e).splitlines()[0][:150]
-            print(f"[musicola] {vid}: atajo falló en {time.time() - t0:.1f}s ({msg})", flush=True)
-            if _fast_failures >= 3:
-                _fast_paused_until = time.time() + 30 * 60
-                _fast_failures = 0
-                print("[musicola] atajo en pausa 30 min tras 3 fallos seguidos", flush=True)
-    # Método normal: clientes por defecto de yt-dlp + cookies (si las hay)
-    return _extract_audio(vid, use_cookies=True, clients=None)
+            print(f"[musicola] {vid}: '{st.name}' falló en {time.time() - t0:.1f}s ({msg})", flush=True)
+            if st.failures >= 3:
+                st.paused_until = time.time() + 30 * 60
+                st.failures = 0
+                print(f"[musicola] '{st.name}' en pausa 30 min tras 3 fallos seguidos", flush=True)
+    t0 = time.time()
+    data = _extract_audio(vid, FALLBACK.use_cookies, FALLBACK.clients)
+    FALLBACK.ok += 1
+    print(f"[musicola] {vid}: 'cookies' OK en {time.time() - t0:.1f}s", flush=True)
+    return data
 
 
 _inflight: dict[str, asyncio.Future] = {}
@@ -342,11 +371,23 @@ async def _safe_resolve(vid: str):
 
 
 @app.get("/healthz")
-async def healthz():
+async def healthz(request: Request):
+    pot = None
+    if POT_ENABLED:
+        try:
+            r = await request.app.state.http.get(POT_URL + "/ping", timeout=3)
+            pot = r.status_code == 200
+        except Exception:
+            pot = False
     return {
+        "generador_tokens": pot,
         "ok": True,
         "cookies": bool(COOKIE_FILE),
-        "atajo": FAST_CLIENT and time.time() >= _fast_paused_until,
+        "estrategias": {
+            st.name: ("activa" if st.available() else "en pausa" if st.enabled else "desactivada")
+            + f" ({st.ok} OK)"
+            for st in [*STRATEGIES, FALLBACK]
+        },
         "memoria_mb": _mem_mb(),
     }
 
