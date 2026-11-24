@@ -265,9 +265,8 @@ $("#btn-radio").onclick = () => {
 // Prepara la siguiente canción en el servidor mientras suena la actual
 function prefetchNext() {
   // Las dos siguientes de la cola
-  // Solo la siguiente: el servidor gratuito tiene poca memoria
-  const n = state.queue[state.index + 1];
-  if (n) prefetch(n.id);
+  // Las dos siguientes (el servidor descarta la precarga si está ocupado)
+  for (const n of state.queue.slice(state.index + 1, state.index + 3)) prefetch(n.id);
 }
 const prefetched = new Set();
 function prefetch(id) {
@@ -374,6 +373,8 @@ $("#search-form").addEventListener("submit", async (e) => {
     }
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     state.results = await r.json();
+    // Precarga escalonada de los 3 primeros resultados (lo más probable es pulsar uno de ellos)
+    state.results.slice(0, 3).forEach((t, i) => setTimeout(() => prefetch(t.id), i * 1500));
     setStatus(state.results.length ? "" : "Sin resultados.");
   } catch (err) { setStatus("Error: " + err.message); }
   renderAll();

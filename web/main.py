@@ -157,6 +157,8 @@ class Strategy:
         self.failures = 0
         self.paused_until = 0.0
         self.ok = 0
+        self.total_s = 0.0
+        self.last_ok = 0.0  # última vez que funcionó: la más reciente se prueba primero
 
     def available(self) -> bool:
         return self.enabled and time.time() >= self.paused_until
@@ -189,7 +191,8 @@ def _extract_audio(vid: str, use_cookies: bool, clients: list[str] | None) -> di
 
 
 def _resolve_sync(vid: str) -> dict:
-    for st in STRATEGIES:
+    # Primero la vía que funcionó más recientemente (sin perder tiempo en las que fallan)
+    for st in sorted(STRATEGIES, key=lambda x: -x.last_ok):
         if not st.available():
             continue
         t0 = time.time()
@@ -197,6 +200,8 @@ def _resolve_sync(vid: str) -> dict:
             data = _extract_audio(vid, st.use_cookies, st.clients)
             st.failures = 0
             st.ok += 1
+            st.total_s += time.time() - t0
+            st.last_ok = time.time()
             print(f"[musicola] {vid}: '{st.name}' OK en {time.time() - t0:.1f}s", flush=True)
             return data
         except Exception as e:
@@ -210,6 +215,7 @@ def _resolve_sync(vid: str) -> dict:
     t0 = time.time()
     data = _extract_audio(vid, FALLBACK.use_cookies, FALLBACK.clients)
     FALLBACK.ok += 1
+    FALLBACK.total_s += time.time() - t0
     print(f"[musicola] {vid}: 'cookies' OK en {time.time() - t0:.1f}s", flush=True)
     return data
 
@@ -246,7 +252,19 @@ def _trim(cache: dict, max_items: int):
 
 # Solo una extracción a la vez: cada una puede arrancar Deno (JavaScript), que consume
 # mucha memoria, y el plan gratuito de Render solo tiene 512 MB.
-_extract_lock = asyncio.Semaphore(1)
+def _mem_limit_mb() -> int | None:
+    try:
+        with open("/sys/fs/cgroup/memory.max") as f:
+            v = f.read().strip()
+        return None if v == "max" else int(v) // 1048576
+    except Exception:
+        return None
+
+
+# Con 1 GB o más se preparan 2 canciones a la vez (se puede fijar con EXTRACT_PARALLEL)
+_lim = _mem_limit_mb()
+EXTRACT_PARALLEL = int(os.environ.get("EXTRACT_PARALLEL", "2" if (_lim or 0) >= 900 else "1"))
+_extract_lock = asyncio.Semaphore(EXTRACT_PARALLEL)
 
 
 async def _resolve_timed(vid: str) -> dict:
@@ -465,10 +483,12 @@ async def healthz(request: Request):
         "disco_permanente": PERSISTENT,
         "estrategias": {
             st.name: ("activa" if st.available() else "en pausa" if st.enabled else "desactivada")
-            + f" ({st.ok} OK)"
+            + f" ({st.ok} OK" + (f", media {st.total_s / st.ok:.1f}s" if st.ok else "") + ")"
             for st in [*STRATEGIES, FALLBACK]
         },
         "memoria_mb": _mem_mb(),
+        "memoria_limite_mb": _lim,
+        "en_paralelo": EXTRACT_PARALLEL,
     }
 
 
