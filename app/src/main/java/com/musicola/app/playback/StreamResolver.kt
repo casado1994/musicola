@@ -22,11 +22,30 @@ object StreamResolver {
         cache.remove(id)
     }
 
+    private val locks = ConcurrentHashMap<String, Any>()
+
+    /** Ya resuelto y vigente (para no repetir trabajo en la precarga). */
+    fun isCached(id: String): Boolean = (cache[id]?.expiresAt ?: 0L) > System.currentTimeMillis()
+
     @Throws(IOException::class)
     fun resolve(id: String): String {
-        val now = System.currentTimeMillis()
-        cache[id]?.takeIf { it.expiresAt > now }?.let { return it.url }
+        cache[id]?.takeIf { it.expiresAt > System.currentTimeMillis() }?.let { return it.url }
+        // Si la precarga ya está resolviendo esta canción, se espera a ella en vez de repetirla
+        synchronized(locks.getOrPut(id) { Any() }) {
+            cache[id]?.takeIf { it.expiresAt > System.currentTimeMillis() }?.let { return it.url }
+            val url = try {
+                FastResolver.resolve(id) // 1 petición, sin JavaScript (como la extensión)
+            } catch (e: IOException) {
+                android.util.Log.w("Musicola", "Vía rápida falló para $id, uso NewPipe: ${e.message}")
+                resolveWithNewPipe(id) // reserva: extractor completo, más lento
+            }
+            cache[id] = Entry(url, System.currentTimeMillis() + TTL_MS)
+            return url
+        }
+    }
 
+    @Throws(IOException::class)
+    private fun resolveWithNewPipe(id: String): String {
         val info = try {
             StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$id")
         } catch (e: IOException) {
@@ -47,7 +66,6 @@ object StreamResolver {
             ?: original.maxByOrNull { it.averageBitrate }
             ?: throw IOException("Este vídeo no tiene audio disponible")
 
-        cache[id] = Entry(best.content, now + TTL_MS)
         return best.content
     }
 }

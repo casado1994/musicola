@@ -15,6 +15,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
@@ -79,7 +80,13 @@ class PlaybackService : MediaLibraryService() {
             } else spec
         }
 
+        // Empieza a sonar con 1 s de audio cargado (por defecto espera 2,5 s)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 50_000, 1_000, 2_000)
+            .build()
+
         val player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
             .setMediaSourceFactory(DefaultMediaSourceFactory(resolving))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -122,6 +129,9 @@ class PlaybackService : MediaLibraryService() {
                     saveQueue(p)
                 }
                 if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) maybeExtendRadio(p)
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED)) {
+                    prefetchNext(p)
+                }
                 if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) && p.playbackState == Player.STATE_ENDED) {
                     maybeExtendRadio(p, force = true)
                 }
@@ -161,6 +171,20 @@ class PlaybackService : MediaLibraryService() {
         }
         session = null
         super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------- precarga
+
+    /** Prepara en segundo plano el audio de las 2 siguientes canciones, para que empiecen al instante. */
+    private fun prefetchNext(p: Player) {
+        val start = p.currentMediaItemIndex + 1
+        val ids = (start until minOf(start + 2, p.mediaItemCount))
+            .map { p.getMediaItemAt(it).mediaId }
+            .filterNot { StreamResolver.isCached(it) }
+        if (ids.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            for (id in ids) runCatching { StreamResolver.resolve(id) }
+        }
     }
 
     // ---------------------------------------------------------------- modo radio

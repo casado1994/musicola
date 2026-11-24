@@ -672,6 +672,10 @@ public final class YoutubeHttpDataSource extends BaseDataSource implements HttpD
         if (isVisionOsStreamingUrl(requestUrl)) {
             httpURLConnection.setRequestProperty(HttpHeaders.USER_AGENT,
                     getVisionOsUserAgent(null));
+        } else if (requestUrl.contains("c=ANDROID_VR")) {
+            // Musicola: audio obtenido con el cliente de reserva ANDROID_VR (FastResolver)
+            httpURLConnection.setRequestProperty(HttpHeaders.USER_AGENT,
+                    FastResolver.ANDROID_VR_UA);
         } else {
             // non-mobile user agent
             httpURLConnection.setRequestProperty(HttpHeaders.USER_AGENT, DownloaderImpl.USER_AGENT);
