@@ -241,8 +241,15 @@ $("#btn-radio").onclick = () => {
 
 // Prepara la siguiente canción en el servidor mientras suena la actual
 function prefetchNext() {
-  const n = state.queue[state.index + 1];
-  if (n) fetch(withToken(`/api/prefetch/${n.id}`)).catch(() => {});
+  // Las dos siguientes de la cola
+  for (const n of state.queue.slice(state.index + 1, state.index + 3)) prefetch(n.id);
+}
+const prefetched = new Set();
+function prefetch(id) {
+  if (prefetched.has(id)) return;
+  prefetched.add(id);
+  setTimeout(() => prefetched.delete(id), 3 * 3600 * 1000); // las URLs caducan a las ~4 h en el servidor
+  fetch(withToken(`/api/prefetch/${id}`)).catch(() => {});
 }
 $("#seek").addEventListener("input", () => { seeking = true; $("#t-cur").textContent = fmt(+$("#seek").value); });
 $("#seek").addEventListener("change", () => { audio.currentTime = +$("#seek").value; seeking = false; });
@@ -320,6 +327,7 @@ $("#search-form").addEventListener("submit", async (e) => {
     }
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     state.results = await r.json();
+    if (state.results[0] && audio.paused) prefetch(state.results[0].id);
     setStatus(state.results.length ? "" : "Sin resultados.");
   } catch (err) { setStatus("Error: " + err.message); }
   renderAll();

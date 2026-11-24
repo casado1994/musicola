@@ -104,7 +104,8 @@ def _radio_sync(vid: str, n: int) -> list[dict]:
 
 
 def _resolve_sync(vid: str) -> dict:
-    with yt_dlp.YoutubeDL(_ydl_opts(format=AUDIO_FORMAT)) as ydl:
+    fast = {"youtube": {"skip": ["hls", "dash", "translated_subs"]}}
+    with yt_dlp.YoutubeDL(_ydl_opts(format=AUDIO_FORMAT, extractor_args=fast)) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
     return {
         "url": info["url"],
@@ -113,17 +114,35 @@ def _resolve_sync(vid: str) -> dict:
     }
 
 
+_inflight: dict[str, asyncio.Future] = {}
+
+
 async def resolve(vid: str, force: bool = False) -> dict:
     now = time.time()
     hit = _url_cache.get(vid)
     if hit and not force and hit[0] > now:
         return hit[1]
+    # Si ya se está resolviendo (p. ej. por la precarga), se espera a esa misma tarea
+    # en vez de lanzar otra: en el plan gratuito la CPU es muy escasa.
+    fut = _inflight.get(vid)
+    if fut is None or force:
+        fut = asyncio.ensure_future(_resolve_timed(vid))
+        _inflight[vid] = fut
+        fut.add_done_callback(lambda f, v=vid: _inflight.pop(v) if _inflight.get(v) is f else None)
     try:
-        data = await asyncio.to_thread(_resolve_sync, vid)
+        data = await asyncio.shield(fut)
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(502, f"No se pudo obtener el audio: {e}") from e
-    _url_cache[vid] = (now + URL_TTL, data)
+    _url_cache[vid] = (time.time() + URL_TTL, data)
     return data
+
+
+async def _resolve_timed(vid: str) -> dict:
+    t0 = time.time()
+    try:
+        return await asyncio.to_thread(_resolve_sync, vid)
+    finally:
+        print(f"[musicola] {vid} resuelto en {time.time() - t0:.1f}s", flush=True)
 
 
 # ---------- App ----------
@@ -131,8 +150,40 @@ async def resolve(vid: str, force: bool = False) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=True)
+    tasks = [asyncio.create_task(_warm_up())]
+    if KEEP_ALIVE_URL:
+        tasks.append(asyncio.create_task(_keep_alive(app.state.http)))
     yield
+    for t in tasks:
+        t.cancel()
     await app.state.http.aclose()
+
+
+# En Render, el servicio gratuito se duerme tras 15 min sin visitas y tarda ~1 min en despertar.
+# Si KEEP_ALIVE no es "0", el propio servidor se visita cada 10 min para no dormirse.
+# (Un solo servicio despierto todo el mes cabe en las 750 h gratuitas de Render.)
+KEEP_ALIVE_URL = None
+if os.environ.get("KEEP_ALIVE", "1") != "0" and os.environ.get("RENDER_EXTERNAL_URL"):
+    KEEP_ALIVE_URL = os.environ["RENDER_EXTERNAL_URL"].rstrip("/") + "/healthz"
+
+
+async def _keep_alive(client: httpx.AsyncClient):
+    while True:
+        await asyncio.sleep(600)
+        try:
+            await client.get(KEEP_ALIVE_URL, timeout=20)
+        except Exception:
+            pass
+
+
+async def _warm_up():
+    """Al arrancar, resuelve un vídeo cualquiera para que yt-dlp descargue y deje en caché
+    el reproductor de YouTube y su reto JavaScript: así la primera canción real va más rápida."""
+    await asyncio.sleep(2)
+    try:
+        await asyncio.to_thread(_resolve_sync, "jNQXAC9IVRw")
+    except Exception as e:
+        print(f"[musicola] calentamiento fallido: {e}", flush=True)
 
 
 app = FastAPI(title="Musicola", lifespan=lifespan)
