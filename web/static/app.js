@@ -82,6 +82,7 @@ function renderAll() {
   renderList($("#queue"), state.queue, "queue");
   renderList($("#favs"), state.favs, "favs");
   $("#queue-count").textContent = state.queue.length ? `(${state.queue.length})` : "";
+  updateQueueBar();
   const t = current();
   $("#np-title").textContent = t ? t.title : "Nada sonando";
   $("#np-channel").textContent = t ? t.channel : "";
@@ -322,10 +323,32 @@ for (const [id, mode] of [["#results", "results"], ["#queue", "queue"], ["#favs"
   });
 }
 
+// Barra "Vaciar cola" (solo en la pestaña Cola y si hay canciones)
+var currentTab = "results"; // var: se usa desde renderAll antes de esta línea
+function updateQueueBar() {
+  $("#queue-bar").classList.toggle("hidden", currentTab !== "queue" || !state.queue.length);
+}
+function clearQueue() {
+  if (!state.queue.length) return;
+  if (!confirm(`¿Eliminar las ${state.queue.length} canciones de la cola?`)) return;
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  state.queue = [];
+  state.index = -1;
+  $("#seek").value = 0; $("#seek").max = 0;
+  $("#t-cur").textContent = "0:00"; $("#t-dur").textContent = "0:00";
+  setLoading(false);
+  persist(); renderAll();
+  setStatus("Cola vacía");
+}
+$("#btn-clear-queue").onclick = clearQueue;
+
 // Pestañas
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
   for (const id of ["results", "queue", "favs"]) $("#" + id).classList.toggle("hidden", id !== b.dataset.tab);
+  currentTab = b.dataset.tab; updateQueueBar();
   setStatus(b.dataset.tab === "favs" && !state.favs.length ? "Aún no tienes favoritos." : "");
 });
 

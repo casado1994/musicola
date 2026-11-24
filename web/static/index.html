@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="stylesheet" href="/style.css?v=6">
+  <link rel="stylesheet" href="/style.css?v=7">
 </head>
 <body>
   <header>
@@ -28,6 +28,9 @@
 
   <main>
     <ul id="results" class="list"></ul>
+    <div id="queue-bar" class="list-bar hidden">
+      <button id="btn-clear-queue" class="text-btn">Vaciar cola</button>
+    </div>
     <ul id="queue" class="list hidden"></ul>
     <ul id="favs" class="list hidden"></ul>
     <p id="status" class="status"></p>
@@ -58,6 +61,6 @@
   </footer>
 
   <audio id="audio" preload="auto"></audio>
-  <script src="/app.js?v=6"></script>
+  <script src="/app.js?v=7"></script>
 </body>
 </html>

@@ -76,3 +76,8 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 .spinner { width: 22px; height: 22px; border: 3px solid currentColor; border-right-color: transparent;
   border-radius: 50%; animation: spin .8s linear infinite; display: block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.list-bar { display: flex; justify-content: flex-end; padding: 8px 16px 0; }
+.list-bar.hidden { display: none; }
+.text-btn { color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 8px; }
+.text-btn:hover { color: var(--text); background: var(--panel); }
