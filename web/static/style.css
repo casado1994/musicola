@@ -54,9 +54,25 @@ main { flex: 1; overflow-y: auto; padding-bottom: 180px; }
 #btn-fav.on { color: var(--accent); }
 
 .item img { cursor: pointer; }
-#btn-play.loading { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 
 .icon.radio { filter: grayscale(1); opacity: .55; }
 .icon.radio.on { filter: none; opacity: 1; }
 .radio-tag { font-size: 11px; color: var(--accent); margin-left: 6px; }
+
+/* Iconos SVG */
+button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
+.icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text); line-height: 0; }
+.icon.small svg { width: 22px; height: 22px; }
+.icon.big { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.icon.big svg { width: 30px; height: 30px; }
+.icon.radio, .icon.radio.on { filter: none; opacity: 1; }
+.icon.radio.on { color: var(--accent); }
+#btn-fav.on, .item .actions button.on { color: var(--accent); }
+#btn-fav svg { width: 22px; height: 22px; }
+.item .actions button { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+.item .actions button svg { width: 20px; height: 20px; }
+.radio-tag svg { width: 12px; height: 12px; fill: currentColor; vertical-align: -1px; display: inline-block; }
+.spinner { width: 22px; height: 22px; border: 3px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin .8s linear infinite; display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }

@@ -8,6 +8,25 @@ if (urlToken) { localStorage.setItem("token", urlToken); history.replaceState(nu
 const TOKEN = localStorage.getItem("token") || "";
 const withToken = (u) => TOKEN ? u + (u.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(TOKEN) : u;
 
+// ---------- Iconos (SVG propios: se ven igual en todos los dispositivos) ----------
+const ICON = {
+  play: "M8 5v14l11-7z",
+  pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
+  prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z",
+  next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z",
+  shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z",
+  repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
+  repeatOne: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z",
+  radio: "M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z",
+  fav: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
+  favOff: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z",
+  add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+  playNext: "M21 3H3c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h5v2h8v-2h2v-2H3V5h18v8h2V5c0-1.11-.9-2-2-2zm-8 7V7h-2v3H8v2h3v3h2v-3h3v-2h-3zm11 8l-4.5 4.5L18 21l3-3-3-3 1.5-1.5L24 18z",
+  close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+  up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z",
+};
+const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
+
 // ---------- Estado persistente ----------
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -48,13 +67,13 @@ function renderList(el, tracks, mode) {
       <img src="${esc(t.thumb)}" alt="" loading="lazy" data-act="play">
       <div class="meta" data-act="play">
         <div class="title">${esc(t.title)}</div>
-        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? '<span class="radio-tag">📻 radio</span>' : ""}</div>
+        <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? '<span class="radio-tag">${icon("radio")} radio</span>' : ""}</div>
       </div>
       <div class="actions">
         ${mode === "queue"
-          ? `<button data-act="up" title="Subir">↑</button><button data-act="remove" title="Quitar">✕</button>`
-          : `<button data-act="radio" title="Iniciar radio con esta canción">📻</button><button data-act="next" title="Reproducir después">⇥</button><button data-act="add" title="Añadir a la cola">＋</button>`}
-        <button data-act="fav" title="Favorito">${isFav(t.id) ? "♥" : "♡"}</button>
+          ? `<button data-act="up" title="Subir">${icon("up")}</button><button data-act="remove" title="Quitar">${icon("close")}</button>`
+          : `<button data-act="radio" title="Iniciar radio con esta canción">${icon("radio")}</button><button data-act="next" title="Reproducir después">${icon("playNext")}</button><button data-act="add" title="Añadir a la cola">${icon("add")}</button>`}
+        <button data-act="fav" class="${isFav(t.id) ? "on" : ""}" title="Favorito">${icon(isFav(t.id) ? "fav" : "favOff")}</button>
       </div>
     </li>`).join("");
 }
@@ -67,11 +86,11 @@ function renderAll() {
   $("#np-title").textContent = t ? t.title : "Nada sonando";
   $("#np-channel").textContent = t ? t.channel : "";
   if (t) $("#np-thumb").src = t.thumb; else $("#np-thumb").removeAttribute("src");
-  $("#btn-fav").textContent = t && isFav(t.id) ? "♥" : "♡";
+  $("#btn-fav").innerHTML = icon(t && isFav(t.id) ? "fav" : "favOff");
   $("#btn-fav").classList.toggle("on", !!(t && isFav(t.id)));
   $("#btn-shuffle").classList.toggle("on", state.shuffle);
   $("#btn-repeat").classList.toggle("on", state.repeat !== "off");
-  $("#btn-repeat").textContent = state.repeat === "one" ? "↻¹" : "↻";
+  $("#btn-repeat").innerHTML = icon(state.repeat === "one" ? "repeatOne" : "repeat");
   $("#btn-radio").classList.toggle("on", state.radio);
 }
 
@@ -154,13 +173,13 @@ let seeking = false;
 let loading = false;
 function setLoading(on) {
   loading = on;
-  $("#btn-play").textContent = on ? "…" : (audio.paused ? "▶" : "⏸");
+  $("#btn-play").innerHTML = on ? '<span class="spinner"></span>' : icon(audio.paused ? "play" : "pause");
   $("#btn-play").classList.toggle("loading", on);
   const t = current();
   if (on && t) setStatus(`Cargando «${t.title}»… (la primera vez puede tardar unos segundos)`);
 }
-audio.addEventListener("play", () => { if (!loading) $("#btn-play").textContent = "⏸"; });
-audio.addEventListener("pause", () => { if (!loading) $("#btn-play").textContent = "▶"; });
+audio.addEventListener("play", () => { if (!loading) $("#btn-play").innerHTML = icon("pause"); });
+audio.addEventListener("pause", () => { if (!loading) $("#btn-play").innerHTML = icon("play"); });
 audio.addEventListener("loadstart", () => { if (audio.getAttribute("src")) setLoading(!audio.paused || audio.autoplay); });
 audio.addEventListener("waiting", () => setLoading(true));
 audio.addEventListener("playing", () => {
@@ -230,12 +249,12 @@ function startRadio(track) {
   state.radio = true;
   state.queue = [track];
   playIndex(0);
-  setStatus(`📻 Radio de «${track.title}»`);
+  setStatus(`Radio de «${track.title}»`);
   extendRadio(true);
 }
 $("#btn-radio").onclick = () => {
   state.radio = !state.radio; persist(); renderAll();
-  setStatus(state.radio ? "📻 Modo radio activado: al acabar la cola sonarán canciones parecidas" : "Modo radio desactivado");
+  setStatus(state.radio ? "Modo radio activado: al acabar la cola sonarán canciones parecidas" : "Modo radio desactivado");
   if (state.radio && !audio.paused) extendRadio();
 };
 
@@ -347,6 +366,6 @@ document.addEventListener("keydown", (e) => {
 // Arranque: restaura la última canción (sin reproducir automáticamente)
 if (current()) playIndex(state.index, false);
 renderAll();
-setStatus(state.queue.length ? "" : "Busca algo para empezar 🎵");
+setStatus(state.queue.length ? "" : "Busca algo para empezar");
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
