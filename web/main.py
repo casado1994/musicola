@@ -223,6 +223,91 @@ def _resolve_sync(vid: str) -> dict:
 _inflight: dict[str, asyncio.Future] = {}
 
 
+# ---- Vía rápida (la misma que la extensión de Chrome) ----
+# UNA petición directa al reproductor de YouTube con un cliente que no necesita JavaScript,
+# sin pasar por yt-dlp (que además descarga la página del vídeo). Muy ligera en CPU.
+# Si falla (p. ej. YouTube pide cuenta), se usa la cadena de yt-dlp de siempre.
+# Datos de los clientes copiados de yt-dlp (yt_dlp/extractor/youtube/_base.py).
+FAST_DIRECT = os.environ.get("FAST_DIRECT", "1") != "0"
+DIRECT_CLIENTS = [
+    {
+        "key": "visionos", "name": "VISIONOS", "id": 101, "version": "1.02",
+        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+        "ctx": {"deviceMake": "Apple", "deviceModel": "RealityDevice17,1", "osName": "visionOS", "osVersion": "26.5.23O471"},
+    },
+    {
+        "key": "android_vr", "name": "ANDROID_VR", "id": 28, "version": "1.65.10",
+        "ua": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+        "ctx": {"deviceMake": "Oculus", "deviceModel": "Quest 3", "androidSdkVersion": 32, "osName": "Android", "osVersion": "12L"},
+    },
+]
+DIRECT = Strategy("rapida", use_cookies=False, clients=None, enabled=FAST_DIRECT)
+_direct_http: httpx.AsyncClient | None = None
+
+
+async def _direct_player(vid: str, c: dict) -> dict:
+    body = {
+        "context": {"client": {"clientName": c["name"], "clientVersion": c["version"], "hl": "es", "gl": "ES", **c["ctx"]}},
+        "videoId": vid, "contentCheckOk": True, "racyCheckOk": True,
+        "playbackContext": {"contentPlaybackContext": {"html5Preference": "HTML5_PREF_WANTS"}},
+    }
+    headers = {
+        "User-Agent": c["ua"], "X-YouTube-Client-Name": str(c["id"]),
+        "X-YouTube-Client-Version": c["version"], "Origin": "https://www.youtube.com",
+    }
+    r = await _direct_http.post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                                json=body, headers=headers, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"YouTube respondió {r.status_code}")
+    j = r.json()
+    st = j.get("playabilityStatus") or {}
+    if st.get("status") != "OK":
+        raise RuntimeError(st.get("reason") or st.get("status") or "vídeo no reproducible")
+    fmts = [f for f in (j.get("streamingData") or {}).get("adaptiveFormats") or []
+            if str(f.get("mimeType", "")).startswith("audio/") and f.get("url")]
+    if not fmts:
+        raise RuntimeError("sin audio disponible")
+    pool = [f for f in fmts if not f.get("audioTrack") or f["audioTrack"].get("audioIsDefault")] or fmts
+    mp4 = [f for f in pool if f["mimeType"].startswith("audio/mp4")]
+    best = max(mp4 or pool, key=lambda f: f.get("bitrate") or 0)
+    return {"url": best["url"], "headers": {"User-Agent": c["ua"]}, "mime": best["mimeType"].split(";")[0]}
+
+
+async def _resolve_direct(vid: str) -> dict:
+    last = None
+    for c in list(DIRECT_CLIENTS):
+        try:
+            data = await _direct_player(vid, c)
+            if DIRECT_CLIENTS[0] is not c:  # el que funcionó pasa a ser el primero
+                DIRECT_CLIENTS.remove(c)
+                DIRECT_CLIENTS.insert(0, c)
+            return data
+        except Exception as e:
+            last = e
+    raise RuntimeError(str(last))
+
+
+async def _resolve_any(vid: str) -> dict:
+    if DIRECT.available() and _direct_http is not None:
+        t0 = time.time()
+        try:
+            data = await _resolve_direct(vid)
+            DIRECT.failures = 0
+            DIRECT.ok += 1
+            DIRECT.total_s += time.time() - t0
+            DIRECT.last_ok = time.time()
+            print(f"[musicola] {vid}: 'rapida' OK en {time.time() - t0:.1f}s", flush=True)
+            return data
+        except Exception as e:
+            DIRECT.failures += 1
+            print(f"[musicola] {vid}: 'rapida' falló en {time.time() - t0:.1f}s ({str(e)[:150]})", flush=True)
+            if DIRECT.failures >= 3:
+                DIRECT.paused_until = time.time() + 30 * 60
+                DIRECT.failures = 0
+                print("[musicola] 'rapida' en pausa 30 min tras 3 fallos seguidos", flush=True)
+    return await _resolve_timed(vid)  # reserva: yt-dlp
+
+
 async def resolve(vid: str, force: bool = False) -> dict:
     now = time.time()
     hit = _url_cache.get(vid)
@@ -232,7 +317,7 @@ async def resolve(vid: str, force: bool = False) -> dict:
     # en vez de lanzar otra: en el plan gratuito la CPU es muy escasa.
     fut = _inflight.get(vid)
     if fut is None or force:
-        fut = asyncio.ensure_future(_resolve_timed(vid))
+        fut = asyncio.ensure_future(_resolve_any(vid))
         _inflight[vid] = fut
         fut.add_done_callback(lambda f, v=vid: _inflight.pop(v) if _inflight.get(v) is f else None)
     try:
@@ -280,7 +365,9 @@ async def _resolve_timed(vid: str) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _direct_http
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=True)
+    _direct_http = httpx.AsyncClient(http2=False, follow_redirects=True)
     tasks = [asyncio.create_task(_warm_up())]
     if KEEP_ALIVE_URL:
         tasks.append(asyncio.create_task(_keep_alive(app.state.http)))
@@ -288,6 +375,7 @@ async def lifespan(app: FastAPI):
     for t in tasks:
         t.cancel()
     await app.state.http.aclose()
+    await _direct_http.aclose()
 
 
 # En Render, el servicio gratuito se duerme tras 15 min sin visitas y tarda ~1 min en despertar.
@@ -311,6 +399,13 @@ async def _warm_up():
     """Al arrancar, resuelve un vídeo cualquiera para que yt-dlp descargue y deje en caché
     el reproductor de YouTube y su reto JavaScript: así la primera canción real va más rápida."""
     await asyncio.sleep(2)
+    if DIRECT.available():
+        try:
+            await _resolve_direct("jNQXAC9IVRw")
+            print("[musicola] vía rápida disponible: no hace falta calentar yt-dlp", flush=True)
+            return
+        except Exception as e:
+            print(f"[musicola] vía rápida no disponible al arrancar ({str(e)[:100]})", flush=True)
     try:
         await asyncio.to_thread(_resolve_sync, "jNQXAC9IVRw")
     except Exception as e:
@@ -407,7 +502,8 @@ async def prefetch(vid: str):
     # La precarga nunca compite con lo que el usuario está escuchando:
     # si ya hay una extracción en marcha (o ya está en caché), no hace nada.
     hit = _url_cache.get(vid)
-    if (hit and hit[0] > time.time()) or vid in _inflight or _extract_lock.locked():
+    busy = _extract_lock.locked() and not DIRECT.available()  # la vía rápida apenas consume
+    if (hit and hit[0] > time.time()) or vid in _inflight or busy:
         return {"ok": True, "skipped": True}
     asyncio.create_task(_safe_resolve(vid))
     return {"ok": True}
@@ -462,7 +558,7 @@ async def upload_cookies(request: Request):
         raise HTTPException(400, "Eso no parece un cookies.txt de YouTube")
     _set_cookies(text)
     _url_cache.clear()
-    for st in [*STRATEGIES, FALLBACK]:
+    for st in [DIRECT, *STRATEGIES, FALLBACK]:
         st.failures, st.paused_until = 0, 0.0
     return {"ok": True, "persistente": PERSISTENT}
 
@@ -484,7 +580,7 @@ async def healthz(request: Request):
         "estrategias": {
             st.name: ("activa" if st.available() else "en pausa" if st.enabled else "desactivada")
             + f" ({st.ok} OK" + (f", media {st.total_s / st.ok:.1f}s" if st.ok else "") + ")"
-            for st in [*STRATEGIES, FALLBACK]
+            for st in [DIRECT, *STRATEGIES, FALLBACK]
         },
         "memoria_mb": _mem_mb(),
         "memoria_limite_mb": _lim,
