@@ -107,7 +107,9 @@ def _radio_sync(vid: str, n: int) -> list[dict]:
 # El cliente "visionos" de YouTube no exige resolver el reto JavaScript (lo más lento en el
 # plan gratuito). No admite cookies, así que si YouTube lo bloquea se usa el método normal.
 # Se puede desactivar con la variable FAST_CLIENT=0.
-FAST_CLIENT = os.environ.get("FAST_CLIENT", "1") != "0"
+# Por defecto solo se usa si NO hay cookies: si las hay es porque YouTube bloquea la IP
+# del servidor, y en ese caso también bloquea el atajo (solo haría perder tiempo).
+FAST_CLIENT = os.environ.get("FAST_CLIENT", "0" if COOKIE_FILE else "1") != "0"
 FAST_CLIENTS = ["visionos"]
 _fast_failures = 0          # fallos seguidos del atajo
 _fast_paused_until = 0.0    # tras varios fallos seguidos, se deja de intentar un rato
