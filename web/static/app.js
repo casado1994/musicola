@@ -269,7 +269,7 @@ $("#btn-radio").onclick = () => {
 function prefetchNext() {
   // Las dos siguientes de la cola
   // Las dos siguientes: el servidor guarda sus primeros segundos de audio
-  prefetchMany(state.queue.slice(state.index + 1, state.index + 3).map((t) => t.id));
+  prefetchMany(state.queue.slice(state.index + 1, state.index + 6).map((t) => t.id));
 }
 const prefetched = new Set();
 // Pide al servidor que prepare varias canciones (en ese orden; lo último pedido va primero)
@@ -385,14 +385,17 @@ document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
 });
 
 // Búsqueda
-$("#search-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const q = $("#q").value.trim(); if (!q) return;
-  $("#q").blur();
-  document.querySelector('.tabs button[data-tab="results"]').click();
-  state.results = []; renderAll(); setStatus("Buscando…");
+// Búsqueda: al pulsar Enter y también mientras escribes (como Spotify)
+let searchSeq = 0;
+async function runSearch(q, { typing = false } = {}) {
+  q = q.trim(); if (!q) return;
+  const seq = ++searchSeq; // si llega una búsqueda más nueva, esta se descarta
+  if (!typing) { $("#q").blur(); state.results = []; renderAll(); }
+  if (currentTab !== "results") document.querySelector('.tabs button[data-tab="results"]').click();
+  if (!state.results.length) setStatus("Buscando…");
   try {
     const r = await fetch(withToken(`/api/search?q=${encodeURIComponent(q)}`));
+    if (seq !== searchSeq) return;
     if (r.status === 401) {
       // Servidor protegido: pide la contraseña una vez y la recuerda en este navegador
       const t = prompt("Contraseña de Musicola:");
@@ -400,12 +403,22 @@ $("#search-form").addEventListener("submit", async (e) => {
       setStatus("Hace falta la contraseña."); return;
     }
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
-    state.results = await r.json();
+    const results = await r.json();
+    if (seq !== searchSeq) return;
+    state.results = results;
     // Como Spotify: el servidor prepara los primeros segundos de TODOS los resultados, de arriba abajo
     prefetchMany(state.results.map((t) => t.id));
     setStatus(state.results.length ? "" : "Sin resultados.");
-  } catch (err) { setStatus("Error: " + err.message); }
+  } catch (err) { if (seq === searchSeq) setStatus("Error: " + err.message); }
   renderAll();
+}
+$("#search-form").addEventListener("submit", (e) => { e.preventDefault(); clearTimeout(typingTimer); runSearch($("#q").value); });
+let typingTimer = null;
+$("#q").addEventListener("input", () => {
+  clearTimeout(typingTimer);
+  const q = $("#q").value.trim();
+  if (q.length < 3) return;
+  typingTimer = setTimeout(() => runSearch(q, { typing: true }), 450);
 });
 
 // ---------- Volumen ----------
@@ -455,6 +468,7 @@ function warmCurrent() {
   const t = current();
   if (t) prefetch(t.id, true);
   prefetchNext();
+  if (state.results.length) setTimeout(() => prefetchMany(state.results.map((r) => r.id)), 1500);
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && audio.paused) warmCurrent();

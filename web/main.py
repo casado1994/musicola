@@ -446,6 +446,15 @@ async def _direct_radio(vid: str) -> list[dict]:
     return _panel(j, vid)
 
 
+_VIDEO_ERRORS = ("edad", "age", "privad", "private", "no está disponible", "unavailable",
+                 "not available", "eliminado", "removed", "copyright", "miembros", "members", "en directo", "live")
+
+
+def _video_specific(msg: str) -> bool:
+    m = msg.lower()
+    return any(k in m for k in _VIDEO_ERRORS)
+
+
 async def _resolve_any(vid: str) -> dict:
     if DIRECT.available() and _direct_http is not None:
         t0 = time.time()
@@ -458,8 +467,12 @@ async def _resolve_any(vid: str) -> dict:
             print(f"[musicola] {vid}: 'rapida' OK en {time.time() - t0:.1f}s", flush=True)
             return data
         except Exception as e:
-            DIRECT.failures += 1
             DIRECT.last_error = str(e)[:160]
+            if _video_specific(str(e)):
+                # Problema de ESE vídeo (edad, privado...): no dice nada de la vía rápida
+                print(f"[musicola] {vid}: 'rapida' no sirve para este vídeo ({str(e)[:100]})", flush=True)
+                return await _resolve_timed(vid)
+            DIRECT.failures += 1
             print(f"[musicola] {vid}: 'rapida' falló en {time.time() - t0:.1f}s ({str(e)[:150]})", flush=True)
             _visitor["exp"] = 0  # la próxima vez, identificador de visitante nuevo
             if DIRECT.failures >= 3:
