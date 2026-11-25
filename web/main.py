@@ -749,6 +749,19 @@ async def stream(vid: str, request: Request):
         raise HTTPException(400, "ID no válido")
     client: httpx.AsyncClient = request.app.state.http
     start, end = _parse_range(request.headers.get("range"))
+    # Si piden el principio de una canción no guardada, se guardan primero sus primeros segundos
+    # y se contesta desde ahí. Safari (iPhone) y otros navegadores móviles piden el audio en
+    # varias peticiones seguidas (primero 2 bytes, luego el resto): así solo la primera va a
+    # YouTube y las demás salen al instante del almacén.
+    if AUDIO.enabled and start < PREFETCH_BYTES and AUDIO.have(vid) <= start:
+        if vid in AUDIO.writing:  # ya se está precargando (p. ej. desde la búsqueda): se espera un poco
+            for _ in range(100):
+                if AUDIO.have(vid) > start or vid not in AUDIO.writing:
+                    break
+                await asyncio.sleep(0.05)
+        else:
+            await _prefetch_audio(vid)
+
     meta = AUDIO.info(vid)
     have = AUDIO.have(vid)
 
