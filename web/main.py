@@ -603,53 +603,210 @@ async def radio(vid: str, n: int = Query(25, ge=1, le=50)):
 
 
 PASS_HEADERS = ("content-length", "content-range", "accept-ranges", "last-modified", "etag")
+CHUNK = 64 * 1024
+
+
+# ---- Almacén de audio en el servidor (como Spotify) ----
+# Cada canción se guarda como un archivo con sus primeros N bytes seguidos (de 0 en adelante).
+#  - La precarga guarda los primeros ~256 KB (10-15 s): al pulsar, el servidor los envía al
+#    instante y pide el resto a YouTube mientras tanto.
+#  - Al escuchar una canción entera, queda guardada completa: la próxima vez no se pide a YouTube.
+# Límite: AUDIO_CACHE_MB (300 por defecto); al llenarse se borra lo escuchado hace más tiempo.
+class AudioStore:
+    def __init__(self, folder: str, max_bytes: int):
+        self.dir = folder
+        self.max = max_bytes
+        self.meta: dict[str, dict] = {}   # id -> {"total": int, "mime": str, "used": float}
+        self.writing: set[str] = set()    # ids con una escritura en curso (solo una a la vez)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            for f in os.listdir(folder):  # empieza limpio: sin metadatos no sabemos qué hay
+                os.remove(os.path.join(folder, f))
+            self.enabled = True
+        except OSError:
+            self.enabled = False
+
+    def path(self, vid: str) -> str:
+        return os.path.join(self.dir, vid)
+
+    def have(self, vid: str) -> int:
+        """Bytes seguidos guardados desde el principio."""
+        try:
+            return os.path.getsize(self.path(vid)) if vid in self.meta else 0
+        except OSError:
+            return 0
+
+    def info(self, vid: str):
+        m = self.meta.get(vid)
+        if m:
+            m["used"] = time.time()
+        return m
+
+    def remember(self, vid: str, total: int | None, mime: str):
+        if total:
+            m = self.meta.setdefault(vid, {"total": total, "mime": mime, "used": time.time()})
+            m["total"], m["mime"] = total, mime
+
+    def forget(self, vid: str):
+        self.meta.pop(vid, None)
+        try:
+            os.remove(self.path(vid))
+        except OSError:
+            pass
+
+    def size(self) -> int:
+        return sum(self.have(v) for v in list(self.meta))
+
+    def evict(self):
+        total = self.size()
+        for vid in sorted(self.meta, key=lambda v: self.meta[v]["used"]):
+            if total <= self.max:
+                break
+            if vid in self.writing:
+                continue
+            total -= self.have(vid)
+            self.forget(vid)
+
+
+AUDIO = AudioStore(os.environ.get("AUDIO_CACHE_DIR", "/tmp/musicola-audio"),
+                   int(os.environ.get("AUDIO_CACHE_MB", "300")) * 1024 * 1024)
+PREFETCH_BYTES = 256 * 1024
+
+
+def _parse_range(h: str | None):
+    m = re.fullmatch(r"bytes=(\d+)-(\d*)", (h or "").strip())
+    if not m:
+        return 0, None
+    return int(m.group(1)), (int(m.group(2)) if m.group(2) else None)
+
+
+async def _open_upstream(client: httpx.AsyncClient, vid: str, start: int, end: int | None):
+    """Abre la descarga desde YouTube a partir de 'start' (reintenta una vez si la URL caducó)."""
+    for attempt in range(2):
+        info = await resolve(vid, force=attempt > 0)
+        headers = dict(info["headers"])
+        headers["Range"] = f"bytes={start}-{'' if end is None else end}"
+        up = await client.send(client.build_request("GET", info["url"], headers=headers), stream=True)
+        if up.status_code in (403, 410) and attempt == 0:
+            await up.aclose()
+            continue
+        if up.status_code >= 400:
+            await up.aclose()
+            raise HTTPException(502, f"YouTube respondió {up.status_code}")
+        total = None
+        cr = up.headers.get("content-range", "")
+        if "/" in cr and cr.rsplit("/", 1)[1].isdigit():
+            total = int(cr.rsplit("/", 1)[1])
+        elif up.status_code == 200 and up.headers.get("content-length", "").isdigit():
+            total = int(up.headers["content-length"])
+        AUDIO.remember(vid, total, info["mime"])
+        return up, info, total
+    raise HTTPException(502, "No se pudo abrir el audio")
+
+
+async def _relay(up: httpx.Response, vid: str, offset: int, limit: int | None):
+    """Reenvía bytes de YouTube y, si continúan justo donde acaba lo guardado, los guarda también."""
+    write = (AUDIO.enabled and vid in AUDIO.meta and vid not in AUDIO.writing
+             and offset == AUDIO.have(vid))
+    f = None
+    if write:
+        AUDIO.writing.add(vid)
+        f = open(AUDIO.path(vid), "ab")
+    sent = 0
+    try:
+        async for chunk in up.aiter_bytes(CHUNK):
+            if limit is not None and sent + len(chunk) > limit:
+                chunk = chunk[: limit - sent]
+            if f:
+                f.write(chunk)
+            sent += len(chunk)
+            yield chunk
+            if limit is not None and sent >= limit:
+                break
+    finally:
+        if f:
+            f.close()
+            AUDIO.writing.discard(vid)
+            AUDIO.evict()
+        await up.aclose()
+
+
+def _read_file(vid: str, start: int, end_excl: int):
+    with open(AUDIO.path(vid), "rb") as f:
+        f.seek(start)
+        left = end_excl - start
+        while left > 0:
+            data = f.read(min(CHUNK, left))
+            if not data:
+                break
+            left -= len(data)
+            yield data
 
 
 @app.get("/api/stream/{vid}")
 async def stream(vid: str, request: Request):
     if not ID_RE.match(vid):
         raise HTTPException(400, "ID no válido")
-
     client: httpx.AsyncClient = request.app.state.http
-    rng = request.headers.get("range")
+    start, end = _parse_range(request.headers.get("range"))
+    meta = AUDIO.info(vid)
+    have = AUDIO.have(vid)
 
-    for attempt in range(2):
-        info = await resolve(vid, force=attempt > 0)
-        headers = dict(info["headers"])
-        if rng:
-            headers["Range"] = rng
-        upstream = await client.send(client.build_request("GET", info["url"], headers=headers), stream=True)
-        if upstream.status_code in (403, 410) and attempt == 0:
-            await upstream.aclose()  # URL caducada: la volvemos a pedir
-            continue
-        break
+    # 1) Lo pedido empieza dentro de lo guardado: se envía al instante y el resto, de YouTube
+    if meta and start < have:
+        total = meta["total"]
+        last = total - 1 if end is None else min(end, total - 1)
+        headers = {"content-range": f"bytes {start}-{last}/{total}", "accept-ranges": "bytes",
+                   "content-length": str(last - start + 1), "cache-control": "no-store"}
 
-    if upstream.status_code >= 400:
-        await upstream.aclose()
-        raise HTTPException(502, f"YouTube respondió {upstream.status_code}")
+        async def body():
+            from_file_end = min(have, last + 1)
+            for chunk in _read_file(vid, start, from_file_end):
+                yield chunk
+            if from_file_end <= last:  # falta el resto: se pide a YouTube desde donde acaba lo guardado
+                up, _, _ = await _open_upstream(client, vid, from_file_end, last)
+                async for chunk in _relay(up, vid, from_file_end, last - from_file_end + 1):
+                    yield chunk
 
-    out_headers = {k: upstream.headers[k] for k in PASS_HEADERS if k in upstream.headers}
+        return StreamingResponse(body(), status_code=206, media_type=meta["mime"], headers=headers)
+
+    # 2) Nada guardado en ese punto: directo de YouTube (guardando si continúa lo que ya hay)
+    up, info, total = await _open_upstream(client, vid, start, end)
+    out_headers = {k: up.headers[k] for k in PASS_HEADERS if k in up.headers}
     out_headers.setdefault("accept-ranges", "bytes")
     out_headers["cache-control"] = "no-store"
-    return StreamingResponse(
-        upstream.aiter_bytes(64 * 1024),
-        status_code=upstream.status_code,
-        media_type=info["mime"],
-        headers=out_headers,
-        background=BackgroundTask(upstream.aclose),
-    )
+    return StreamingResponse(_relay(up, vid, start, None), status_code=up.status_code,
+                             media_type=info["mime"], headers=out_headers)
+
+
+async def _prefetch_audio(vid: str):
+    """Guarda en el servidor los primeros segundos de audio de una canción."""
+    if not AUDIO.enabled or AUDIO.have(vid) >= PREFETCH_BYTES or vid in AUDIO.writing:
+        return
+    try:
+        have = AUDIO.have(vid)
+        up, _, _ = await _open_upstream(app.state.http, vid, have, PREFETCH_BYTES - 1)
+        async for _ in _relay(up, vid, have, PREFETCH_BYTES - have):
+            pass
+    except Exception as e:
+        print(f"[musicola] precarga de audio de {vid} falló: {str(e)[:120]}", flush=True)
 
 
 @app.get("/api/prefetch/{vid}")
-async def prefetch(vid: str):
+async def prefetch(vid: str, audio: int = 0):
     """Resuelve la URL del audio por adelantado (para que la siguiente canción empiece al instante)."""
     if not ID_RE.match(vid):
         raise HTTPException(400, "ID no válido")
     # La precarga nunca compite con lo que el usuario está escuchando:
     # si ya hay una extracción en marcha (o ya está en caché), no hace nada.
-    hit = _url_cache.get(vid)
     busy = _extract_lock.locked() and not DIRECT.available()  # la vía rápida apenas consume
-    if (hit and hit[0] > time.time()) or vid in _inflight or busy:
+    if busy:
+        return {"ok": True, "skipped": True}
+    if audio:  # además de la URL, los primeros segundos de audio
+        asyncio.create_task(_prefetch_audio(vid))
+        return {"ok": True, "audio": True}
+    hit = _url_cache.get(vid)
+    if (hit and hit[0] > time.time()) or vid in _inflight:
         return {"ok": True, "skipped": True}
     asyncio.create_task(_safe_resolve(vid))
     return {"ok": True}
@@ -729,6 +886,8 @@ async def healthz(request: Request):
             for st in [DIRECT, *STRATEGIES, FALLBACK]
         },
         "memoria_mb": _mem_mb(),
+        "audio_guardado": f"{len(AUDIO.meta)} canciones, {AUDIO.size() // 1048576} MB de {AUDIO.max // 1048576} MB"
+        if AUDIO.enabled else "desactivado",
         "memoria_limite_mb": _lim,
         "en_paralelo": EXTRACT_PARALLEL,
     }
