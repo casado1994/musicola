@@ -1,13 +1,11 @@
 package com.musicola.app.playback
 
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * Vía rápida (la misma que la extensión de Chrome): UNA sola petición al reproductor de YouTube
@@ -44,10 +42,7 @@ object FastResolver {
         ),
     )
 
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val http get() = com.musicola.app.data.Net.http // conexiones compartidas y precalentadas
 
     /** Devuelve la URL directa del mejor audio, probando primero el cliente que funcionó la última vez. */
     @Throws(IOException::class)

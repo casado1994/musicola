@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.musicola.app.data.Net
 import com.musicola.app.playback.PlaybackService
 import com.musicola.app.ui.MusicolaScreen
 import com.musicola.app.ui.PlayerViewModel
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        Net.warmUp() // conecta con YouTube por adelantado mientras eliges qué escuchar
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future

@@ -12,7 +12,10 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.musicola.app.data.Track
 import com.musicola.app.data.YouTube
+import com.musicola.app.playback.StreamResolver
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
@@ -123,10 +126,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 results = YouTube.search(q, onlySongs)
                 if (results.isEmpty()) message = "Sin resultados."
+                prefetchResults(results)
             } catch (e: Exception) {
                 message = "Error al buscar: ${e.message ?: e.javaClass.simpleName}"
             } finally {
                 loading = false
+            }
+        }
+    }
+
+    private var prefetchJob: Job? = null
+
+    /**
+     * Prepara en segundo plano el audio de los 3 primeros resultados (lo más probable es
+     * pulsar uno de ellos): así empiezan a sonar casi al instante.
+     */
+    private fun prefetchResults(list: List<Track>) {
+        prefetchJob?.cancel() // una búsqueda nueva sustituye a la anterior
+        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            for (t in list.take(3)) {
+                if (!isActive) break
+                if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) }
             }
         }
     }

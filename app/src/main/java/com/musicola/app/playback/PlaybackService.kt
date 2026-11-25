@@ -360,6 +360,10 @@ class PlaybackService : MediaLibraryService() {
                 val results = runCatching { YouTube.search(query, onlySongs = true) }.getOrDefault(emptyList())
                 searchResults[query] = results
                 session.notifySearchResultChanged(browser, query, results.size, params)
+                // Android Auto: prepara el audio de los 3 primeros resultados
+                launch(Dispatchers.IO) {
+                    for (t in results.take(3)) if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) }
+                }
             }
             return Futures.immediateFuture(LibraryResult.ofVoid())
         }

@@ -1,13 +1,11 @@
 package com.musicola.app.data
 
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * Búsqueda y radio con UNA petición directa a YouTube / YouTube Music, igual que la extensión
@@ -22,10 +20,7 @@ object DirectYouTube {
     private const val DESKTOP_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val http get() = com.musicola.app.data.Net.http // conexiones compartidas y precalentadas
 
     private val ID_RE = Regex("^[A-Za-z0-9_-]{11}$")
     private val DUR_RE = Regex("^\\d+(:\\d{2}){1,2}$")
