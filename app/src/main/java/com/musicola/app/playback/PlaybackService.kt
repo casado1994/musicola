@@ -14,7 +14,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -68,26 +67,17 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
 
-        // Peticiones al estilo de NewPipe (POST + parámetro rn) para que YouTube no corte la descarga
-        val youtubeHttp = YoutubeHttpDataSource.Factory()
-            .setRangeParameterEnabled(false)
-            .setRnParameterEnabled(true)
+        // Audio: almacén en el móvil + precarga + YouTube (ver AudioCache)
+        AudioCache.init(this)
 
-        // "yt:VIDEO_ID" -> URL real del audio, resuelta en el hilo de carga
-        val resolving = ResolvingDataSource.Factory(youtubeHttp) { spec ->
-            if (spec.uri.scheme == "yt") {
-                spec.withUri(Uri.parse(StreamResolver.resolve(spec.uri.schemeSpecificPart)))
-            } else spec
-        }
-
-        // Empieza a sonar con 1 s de audio cargado (por defecto espera 2,5 s)
+        // Empieza a sonar con 0,5 s de audio cargado (por defecto espera 2,5 s)
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 50_000, 1_000, 2_000)
+            .setBufferDurationsMs(15_000, 50_000, 500, 1_500)
             .build()
 
         val player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolving))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(AudioCache.factory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -112,6 +102,7 @@ class PlaybackService : MediaLibraryService() {
                     // Probablemente la URL ha caducado: se vuelve a pedir una vez
                     retriedId = id
                     StreamResolver.invalidate(id)
+                    AudioCache.remove(id) // por si lo guardado en el móvil estaba dañado
                     player.prepare()
                     player.play()
                 } else if (player.hasNextMediaItem()) {
@@ -180,10 +171,11 @@ class PlaybackService : MediaLibraryService() {
         val start = p.currentMediaItemIndex + 1
         val ids = (start until minOf(start + 2, p.mediaItemCount))
             .map { p.getMediaItemAt(it).mediaId }
-            .filterNot { StreamResolver.isCached(it) }
+            .filterNot { AudioCache.hasStart(it) }
         if (ids.isEmpty()) return
-        scope.launch(Dispatchers.IO) {
-            for (id in ids) runCatching { StreamResolver.resolve(id) }
+        // Primeros segundos de audio en el móvil: al pasar de canción suena al instante
+        scope.launch(AudioCache.dispatcher) {
+            for (id in ids) AudioCache.prefetchStart(id)
         }
     }
 
@@ -360,9 +352,10 @@ class PlaybackService : MediaLibraryService() {
                 val results = runCatching { YouTube.search(query, onlySongs = true) }.getOrDefault(emptyList())
                 searchResults[query] = results
                 session.notifySearchResultChanged(browser, query, results.size, params)
-                // Android Auto: prepara el audio de todos los resultados, de arriba abajo
-                launch(Dispatchers.IO) {
-                    for (t in results) if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) }
+                // Android Auto: primeros segundos de audio de los 5 primeros y URL del resto
+                launch(AudioCache.dispatcher) {
+                    for (t in results.take(5)) AudioCache.prefetchStart(t.id)
+                    for (t in results.drop(5)) if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) }
                 }
             }
             return Futures.immediateFuture(LibraryResult.ofVoid())

@@ -62,7 +62,8 @@ object StreamResolver {
             it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL
         }.ifEmpty { streams }
 
-        val best = original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+        val best = original.firstOrNull { it.itag == 140 } // la misma versión que la vía rápida
+            ?: original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
             ?: original.maxByOrNull { it.averageBitrate }
             ?: throw IOException("Este vídeo no tiene audio disponible")
 

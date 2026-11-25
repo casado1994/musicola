@@ -97,18 +97,22 @@ object FastResolver {
 
         val formats = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")
             ?: throw IOException("Sin formatos")
-        data class F(val url: String, val mime: String, val bitrate: Int, val isDefault: Boolean)
+        data class F(val url: String, val mime: String, val bitrate: Int, val isDefault: Boolean, val itag: Int)
         val audio = (0 until formats.length()).mapNotNull { i ->
             val f = formats.getJSONObject(i)
             val mime = f.optString("mimeType")
             val url = f.optString("url")
             if (!mime.startsWith("audio/") || url.isBlank()) return@mapNotNull null
+            if (f.optBoolean("isDrc")) return@mapNotNull null // variante con volumen comprimido
             val track = f.optJSONObject("audioTrack")
-            F(url, mime, f.optInt("bitrate"), track == null || track.optBoolean("audioIsDefault"))
+            F(url, mime, f.optInt("bitrate"), track == null || track.optBoolean("audioIsDefault"), f.optInt("itag"))
         }
         if (audio.isEmpty()) throw IOException("Sin audio disponible")
         val pool = audio.filter { it.isDefault }.ifEmpty { audio } // evita doblajes automáticos
-        val best = pool.filter { it.mime.startsWith("audio/mp4") }.maxByOrNull { it.bitrate }
+        // Siempre la misma versión (itag 140 = AAC 128 kbps si existe): el principio guardado
+        // en el móvil y el resto descargado después tienen que ser el mismo archivo.
+        val best = pool.firstOrNull { it.itag == 140 }
+            ?: pool.filter { it.mime.startsWith("audio/mp4") }.maxByOrNull { it.bitrate }
             ?: pool.maxByOrNull { it.bitrate }!!
         return best.url
     }

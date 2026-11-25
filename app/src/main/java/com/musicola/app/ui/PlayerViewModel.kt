@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.musicola.app.data.Track
 import com.musicola.app.data.YouTube
+import com.musicola.app.playback.AudioCache
 import com.musicola.app.playback.StreamResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -140,14 +141,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var prefetchJob: Job? = null
 
     /**
-     * Prepara en segundo plano el audio de TODOS los resultados, en orden (primero los de
-     * arriba), de 2 en 2: así cualquiera que pulses empieza a sonar casi al instante.
-     * Solo se descargan los datos de cada canción (unos 100 KB), no el audio.
+     * Precarga, como Spotify:
+     *  - los 5 primeros resultados: sus primeros segundos de AUDIO quedan en el móvil
+     *    (al pulsarlos suenan casi al instante);
+     *  - el resto: solo la dirección del audio (empiezan rápido, aunque no tanto).
      */
     private fun prefetchResults(list: List<Track>) {
         prefetchJob?.cancel() // una búsqueda nueva sustituye a la anterior
-        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
-            for (pair in list.chunked(2)) {
+        prefetchJob = viewModelScope.launch(AudioCache.dispatcher) {
+            for (pair in list.take(5).chunked(2)) {
+                if (!isActive) break
+                pair.map { t -> async { AudioCache.prefetchStart(t.id) } }.awaitAll()
+            }
+            for (pair in list.drop(5).chunked(2)) {
                 if (!isActive) break
                 pair.map { t ->
                     async { if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) } }

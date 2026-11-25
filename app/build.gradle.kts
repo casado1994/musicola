@@ -12,8 +12,8 @@ android {
         applicationId = "com.musicola.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     // Clave fija incluida en el repo: así cada APK nuevo se instala encima del anterior
@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-session:$media3")
     implementation("androidx.media3:media3-datasource:$media3")
+    implementation("androidx.media3:media3-database:$media3") // almacén de audio en el móvil
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
