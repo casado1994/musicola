@@ -81,3 +81,14 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 .list-bar.hidden { display: none; }
 .text-btn { color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 8px; }
 .text-btn:hover { color: var(--text); background: var(--panel); }
+
+/* Volumen */
+.volume { display: flex; align-items: center; gap: 4px; }
+#volume { width: 96px; height: 4px; cursor: pointer; -webkit-appearance: none; appearance: none; border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--fill, 100%), var(--line) var(--fill, 100%)); }
+#volume::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text); border: 0; opacity: 0; transition: opacity .15s; }
+.volume:hover #volume::-webkit-slider-thumb, #volume:focus-visible::-webkit-slider-thumb { opacity: 1; }
+#btn-mute { color: var(--muted); }
+#btn-mute:hover { color: var(--text); }
+@media (max-width: 420px) { #volume { width: 64px; } }

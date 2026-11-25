@@ -287,6 +287,138 @@ async def _resolve_direct(vid: str) -> dict:
     raise RuntimeError(str(last))
 
 
+# ---- Búsqueda y radio directas (igual que la extensión: extension/yt.js) ----
+WEB_CLIENT = {"name": "WEB", "id": 1, "version": "2.20260708.00.00"}
+MUSIC_CLIENT = {"name": "WEB_REMIX", "id": 67, "version": "1.20260707.12.00"}
+DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+
+
+async def _innertube(host: str, endpoint: str, client: dict, body: dict) -> dict:
+    payload = {"context": {"client": {"clientName": client["name"], "clientVersion": client["version"],
+                                      "hl": "es", "gl": "ES"}}, **body}
+    origin = f"https://{host}"
+    r = await _direct_http.post(
+        f"https://{host}/youtubei/v1/{endpoint}?prettyPrint=false", json=payload, timeout=15,
+        headers={"User-Agent": DESKTOP_UA, "X-YouTube-Client-Name": str(client["id"]),
+                 "X-YouTube-Client-Version": client["version"], "Origin": origin, "Referer": origin + "/"})
+    if r.status_code != 200:
+        raise RuntimeError(f"YouTube respondió {r.status_code}")
+    return r.json()
+
+
+def _walk(o, fn):
+    if isinstance(o, list):
+        for x in o:
+            _walk(x, fn)
+    elif isinstance(o, dict):
+        fn(o)
+        for v in o.values():
+            _walk(v, fn)
+
+
+def _text(x) -> str:
+    if not x:
+        return ""
+    if isinstance(x, str):
+        return x
+    return x.get("simpleText") or x.get("content") or "".join(r.get("text", "") for r in x.get("runs") or [])
+
+
+def _secs(s):
+    if not s or not re.fullmatch(r"\d+(:\d{2}){1,2}", s):
+        return None
+    t = 0
+    for p in s.split(":"):
+        t = t * 60 + int(p)
+    return t
+
+
+def _track(vid, title, channel, duration):
+    return {"id": vid, "title": title or "Sin título", "channel": channel or "", "duration": duration,
+            "thumb": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"}
+
+
+def _dedupe(items):
+    seen, out = set(), []
+    for t in items:
+        if t["id"] not in seen and ID_RE.match(t["id"]):
+            seen.add(t["id"])
+            out.append(t)
+    return out
+
+
+async def _direct_search(q: str) -> list[dict]:
+    out = []
+    # 1) Filtro "Canciones" de YouTube Music
+    try:
+        j = await _innertube("music.youtube.com", "search", MUSIC_CLIENT,
+                             {"query": q, "params": "EgWKAQIIAWoMEA4QChADEAQQCRAF"})
+
+        def song(o):
+            r = o.get("musicResponsiveListItemRenderer")
+            if not r:
+                return
+            vid = (r.get("playlistItemData") or {}).get("videoId")
+            if not vid:
+                found = []
+                _walk(r, lambda x: found.append(x["watchEndpoint"]["videoId"])
+                      if isinstance(x.get("watchEndpoint"), dict) and x["watchEndpoint"].get("videoId") else None)
+                vid = found[0] if found else None
+            if not vid:
+                return
+            cols = [[run.get("text", "") for run in
+                     ((c.get("musicResponsiveListItemFlexColumnRenderer") or {}).get("text") or {}).get("runs") or []]
+                    for c in r.get("flexColumns") or []]
+            title = "".join(cols[0]) if cols else ""
+            sub = [x for x in (cols[1] if len(cols) > 1 else []) if x.strip() and x.strip() != "•"]
+            dur = next((x for x in reversed(sub) if _secs(x) is not None), None)
+            artist = (sub[1] if len(sub) > 1 else "") if sub and sub[0] in ("Canción", "Song", "Vídeo", "Video") \
+                else (sub[0] if sub else "")
+            out.append(_track(vid, title, artist, _secs(dur)))
+
+        _walk(j, song)
+    except Exception as e:
+        print(f"[musicola] búsqueda de canciones falló: {e}", flush=True)
+    # 2) Reserva: vídeos de YouTube normal
+    if not out:
+        j = await _innertube("www.youtube.com", "search", WEB_CLIENT, {"query": q, "params": "EgIQAQ=="})
+
+        def video(o):
+            v = o.get("videoRenderer")
+            if v and v.get("videoId"):
+                out.append(_track(v["videoId"], _text(v.get("title")),
+                                  _text(v.get("ownerText") or v.get("longBylineText")), _secs(_text(v.get("lengthText")))))
+
+        _walk(j, video)
+    return _dedupe(out)
+
+
+def _panel(j: dict, seed: str) -> list[dict]:
+    out = []
+
+    def item(o):
+        v = o.get("playlistPanelVideoRenderer")
+        if v and v.get("videoId") and v["videoId"] != seed:
+            by = (v.get("shortBylineText") or v.get("longBylineText") or {}).get("runs") or [{}]
+            out.append(_track(v["videoId"], _text(v.get("title")), by[0].get("text", ""), _secs(_text(v.get("lengthText")))))
+
+    _walk(j, item)
+    return _dedupe(out)
+
+
+async def _direct_radio(vid: str) -> list[dict]:
+    try:
+        j = await _innertube("music.youtube.com", "next", MUSIC_CLIENT,
+                             {"videoId": vid, "playlistId": "RDAMVM" + vid, "isAudioOnly": True})
+        res = _panel(j, vid)
+        if res:
+            return res
+    except Exception as e:
+        print(f"[musicola] radio (Music) falló: {e}", flush=True)
+    j = await _innertube("www.youtube.com", "next", WEB_CLIENT, {"videoId": vid, "playlistId": "RD" + vid})
+    return _panel(j, vid)
+
+
 async def _resolve_any(vid: str) -> dict:
     if DIRECT.available() and _direct_http is not None:
         t0 = time.time()
@@ -430,10 +562,17 @@ async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Que
     hit = _search_cache.get(key)
     if hit and hit[0] > time.time():
         return hit[1]
-    try:
-        results = await asyncio.to_thread(_search_sync, q, n)
-    except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(502, f"Error buscando: {e}") from e
+    results = []
+    if FAST_DIRECT and _direct_http is not None:
+        try:
+            results = (await _direct_search(q))[:n]  # como la extensión: directo a YouTube Music
+        except Exception as e:
+            print(f"[musicola] búsqueda directa falló, uso yt-dlp: {e}", flush=True)
+    if not results:
+        try:
+            results = await asyncio.to_thread(_search_sync, q, n)
+        except yt_dlp.utils.DownloadError as e:
+            raise HTTPException(502, f"Error buscando: {e}") from e
     _search_cache[key] = (time.time() + 600, results)
     _trim(_search_cache, 100)
     return results
@@ -449,7 +588,14 @@ async def radio(vid: str, n: int = Query(25, ge=1, le=50)):
     hit = _radio_cache.get(vid)
     if hit and hit[0] > time.time():
         return hit[1][:n]
-    results = await asyncio.to_thread(_radio_sync, vid, n)
+    results = []
+    if FAST_DIRECT and _direct_http is not None:
+        try:
+            results = (await _direct_radio(vid))[:n]
+        except Exception as e:
+            print(f"[musicola] radio directa falló, uso yt-dlp: {e}", flush=True)
+    if not results:
+        results = await asyncio.to_thread(_radio_sync, vid, n)
     if results:
         _radio_cache[vid] = (time.time() + 1800, results)
         _trim(_radio_cache, 100)

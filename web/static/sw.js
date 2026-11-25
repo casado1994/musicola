@@ -1,5 +1,5 @@
 // Service worker: cachea solo la interfaz (nunca /api) para que la PWA sea instalable y abra rápido.
-const CACHE = "musicola-v9";
+const CACHE = "musicola-v10";
 const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
