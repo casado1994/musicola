@@ -10,11 +10,19 @@ import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQu
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
-/** Búsqueda y metadatos de YouTube usando el extractor de NewPipe (sin API key). */
+/** Búsqueda, radio y metadatos de YouTube: vía directa (como la extensión) con NewPipe de reserva. */
 object YouTube {
     private val service get() = ServiceList.YouTube
 
     suspend fun search(query: String, onlySongs: Boolean): List<Track> = withContext(Dispatchers.IO) {
+        // Vía rápida, como la extensión: una petición directa a YouTube Music / YouTube
+        val direct = runCatching {
+            if (onlySongs) DirectYouTube.searchSongs(query).ifEmpty { DirectYouTube.searchVideos(query) }
+            else DirectYouTube.searchVideos(query)
+        }.onFailure { android.util.Log.w("Musicola", "Búsqueda directa falló: ${it.message}") }.getOrNull()
+        if (!direct.isNullOrEmpty()) return@withContext direct
+
+        // Reserva: extractor de NewPipe
         val filter = listOf(
             if (onlySongs) YoutubeSearchQueryHandlerFactory.MUSIC_SONGS
             else YoutubeSearchQueryHandlerFactory.VIDEOS
@@ -28,6 +36,12 @@ object YouTube {
      * con el Mix normal y los vídeos relacionados como reserva.
      */
     suspend fun radio(id: String, max: Int = 25): List<Track> = withContext(Dispatchers.IO) {
+        // Vía rápida, como la extensión
+        val direct = runCatching { DirectYouTube.radio(id) }
+            .onFailure { android.util.Log.w("Musicola", "Radio directa falló: ${it.message}") }.getOrNull()
+        if (!direct.isNullOrEmpty()) return@withContext direct.take(max)
+
+        // Reserva: extractor de NewPipe
         for (listId in listOf("RDAMVM$id", "RD$id")) {
             val items = runCatching {
                 PlaylistInfo.getInfo(service, "https://www.youtube.com/watch?v=$id&list=$listId").relatedItems
