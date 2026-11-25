@@ -529,7 +529,7 @@ async def lifespan(app: FastAPI):
     global _direct_http
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=True)
     _direct_http = httpx.AsyncClient(http2=False, follow_redirects=True)
-    tasks = [asyncio.create_task(_warm_up())]
+    tasks = [asyncio.create_task(_warm_up()), asyncio.create_task(_prefetch_worker())]
     if KEEP_ALIVE_URL:
         tasks.append(asyncio.create_task(_keep_alive(app.state.http)))
     yield
@@ -869,6 +869,40 @@ async def prefetch(vid: str, audio: int = 0):
     return {"ok": True}
 
 
+# ---- Cola de precarga (como Spotify: prepara todo lo que tienes a la vista) ----
+# Se procesa de una en una, así lo que el usuario pulsa nunca espera detrás de muchas
+# precargas (como mucho, detrás de la que está en curso). Lo último pedido va primero.
+_pending: list[str] = []
+_pending_event = asyncio.Event()
+MAX_PENDING = 40
+
+
+def _enqueue_prefetch(ids: list[str]):
+    ids = [v for v in ids if ID_RE.match(v) and AUDIO.have(v) < PREFETCH_BYTES]
+    rest = [v for v in _pending if v not in ids]
+    _pending[:] = (ids + rest)[:MAX_PENDING]
+    if _pending:
+        _pending_event.set()
+
+
+async def _prefetch_worker():
+    while True:
+        await _pending_event.wait()
+        while _pending:
+            vid = _pending.pop(0)
+            if AUDIO.have(vid) >= PREFETCH_BYTES or vid in AUDIO.writing:
+                continue
+            await _prefetch_audio(vid)
+        _pending_event.clear()
+
+
+@app.get("/api/prefetch_many")
+async def prefetch_many(ids: str = Query(..., max_length=2000)):
+    """Precarga los primeros segundos de varias canciones, en el orden recibido."""
+    _enqueue_prefetch([v for v in ids.split(",") if v][:MAX_PENDING])
+    return {"ok": True, "pendientes": len(_pending)}
+
+
 async def _safe_resolve(vid: str):
     try:
         await resolve(vid)
@@ -943,6 +977,7 @@ async def healthz(request: Request):
             for st in [DIRECT, *STRATEGIES, FALLBACK]
         },
         "ultimos_errores": {st.name: st.last_error for st in [DIRECT, *STRATEGIES, FALLBACK] if st.last_error},
+        "precargas_pendientes": len(_pending),
         "memoria_mb": _mem_mb(),
         "audio_guardado": f"{len(AUDIO.meta)} canciones, {AUDIO.size() // 1048576} MB de {AUDIO.max // 1048576} MB"
         if AUDIO.enabled else "desactivado",

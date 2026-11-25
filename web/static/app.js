@@ -269,9 +269,18 @@ $("#btn-radio").onclick = () => {
 function prefetchNext() {
   // Las dos siguientes de la cola
   // Las dos siguientes: el servidor guarda sus primeros segundos de audio
-  for (const n of state.queue.slice(state.index + 1, state.index + 3)) prefetch(n.id, true);
+  prefetchMany(state.queue.slice(state.index + 1, state.index + 3).map((t) => t.id));
 }
 const prefetched = new Set();
+// Pide al servidor que prepare varias canciones (en ese orden; lo último pedido va primero)
+let lastMany = "";
+function prefetchMany(ids) {
+  const list = ids.filter(Boolean).slice(0, 40).join(",");
+  if (!list || list === lastMany) return;
+  lastMany = list;
+  fetch(withToken(`/api/prefetch_many?ids=${list}`)).catch(() => {});
+}
+
 function prefetch(id, audio = false) {
   const key = id + (audio ? ":a" : "");
   if (prefetched.has(key)) return;
@@ -352,11 +361,26 @@ function clearQueue() {
 }
 $("#btn-clear-queue").onclick = clearQueue;
 
+// Al tocar una canción se empieza a preparar ya (antes de levantar el dedo)
+for (const id of ["#results", "#queue", "#favs"]) {
+  $(id).addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".actions")) return;
+    const li = e.target.closest(".item");
+    if (!li) return;
+    const list = id === "#results" ? state.results : id === "#queue" ? state.queue : state.favs;
+    const t = list[+li.dataset.i];
+    if (t) prefetch(t.id, true);
+  }, { passive: true });
+}
+
 // Pestañas
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
   for (const id of ["results", "queue", "favs"]) $("#" + id).classList.toggle("hidden", id !== b.dataset.tab);
   currentTab = b.dataset.tab; updateQueueBar();
+  // Al mirar la cola o los favoritos, se preparan sus canciones
+  if (b.dataset.tab === "queue") prefetchMany(state.queue.slice(Math.max(0, state.index), state.index + 15).map((t) => t.id));
+  if (b.dataset.tab === "favs") prefetchMany(state.favs.slice(0, 15).map((t) => t.id));
   setStatus(b.dataset.tab === "favs" && !state.favs.length ? "Aún no tienes favoritos." : "");
 });
 
@@ -377,8 +401,8 @@ $("#search-form").addEventListener("submit", async (e) => {
     }
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     state.results = await r.json();
-    // Como Spotify: el servidor guarda los primeros segundos de audio de los 5 primeros resultados
-    state.results.slice(0, 5).forEach((t, i) => setTimeout(() => prefetch(t.id, true), i * 400));
+    // Como Spotify: el servidor prepara los primeros segundos de TODOS los resultados, de arriba abajo
+    prefetchMany(state.results.map((t) => t.id));
     setStatus(state.results.length ? "" : "Sin resultados.");
   } catch (err) { setStatus("Error: " + err.message); }
   renderAll();
