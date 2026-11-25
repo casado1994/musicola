@@ -158,6 +158,7 @@ class Strategy:
         self.paused_until = 0.0
         self.ok = 0
         self.total_s = 0.0
+        self.last_error = ""
         self.last_ok = 0.0  # última vez que funcionó: la más reciente se prueba primero
 
     def available(self) -> bool:
@@ -206,6 +207,7 @@ def _resolve_sync(vid: str) -> dict:
             return data
         except Exception as e:
             st.failures += 1
+            st.last_error = str(e).splitlines()[0][:160]
             msg = str(e).splitlines()[0][:150]
             print(f"[musicola] {vid}: '{st.name}' falló en {time.time() - t0:.1f}s ({msg})", flush=True)
             if st.failures >= 3:
@@ -245,9 +247,32 @@ DIRECT = Strategy("rapida", use_cookies=False, clients=None, enabled=FAST_DIRECT
 _direct_http: httpx.AsyncClient | None = None
 
 
+_visitor = {"data": None, "exp": 0.0}
+
+
+async def _visitor_data(refresh: bool = False) -> str | None:
+    """Identificador de visitante de YouTube (como hace yt-dlp al visitar la página antes de pedir el audio)."""
+    if not refresh and _visitor["data"] and _visitor["exp"] > time.time():
+        return _visitor["data"]
+    try:
+        r = await _direct_http.get("https://www.youtube.com/", timeout=10,
+                                   headers={"User-Agent": DESKTOP_UA, "Accept-Language": "es-ES,es;q=0.9"})
+        m = re.search(r'"VISITOR_DATA":"([^"]+)"', r.text) or re.search(r'"visitorData":"([^"]+)"', r.text)
+        if m:
+            _visitor.update(data=m.group(1), exp=time.time() + 6 * 3600)
+            return m.group(1)
+    except Exception as e:
+        print(f"[musicola] no se pudo obtener visitorData: {e}", flush=True)
+    return _visitor["data"]
+
+
 async def _direct_player(vid: str, c: dict) -> dict:
+    visitor = await _visitor_data()
+    client_ctx = {"clientName": c["name"], "clientVersion": c["version"], "hl": "es", "gl": "ES", **c["ctx"]}
+    if visitor:
+        client_ctx["visitorData"] = visitor
     body = {
-        "context": {"client": {"clientName": c["name"], "clientVersion": c["version"], "hl": "es", "gl": "ES", **c["ctx"]}},
+        "context": {"client": client_ctx},
         "videoId": vid, "contentCheckOk": True, "racyCheckOk": True,
         "playbackContext": {"contentPlaybackContext": {"html5Preference": "HTML5_PREF_WANTS"}},
     }
@@ -255,6 +280,8 @@ async def _direct_player(vid: str, c: dict) -> dict:
         "User-Agent": c["ua"], "X-YouTube-Client-Name": str(c["id"]),
         "X-YouTube-Client-Version": c["version"], "Origin": "https://www.youtube.com",
     }
+    if visitor:
+        headers["X-Goog-Visitor-Id"] = visitor
     r = await _direct_http.post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                                 json=body, headers=headers, timeout=15)
     if r.status_code != 200:
@@ -432,7 +459,9 @@ async def _resolve_any(vid: str) -> dict:
             return data
         except Exception as e:
             DIRECT.failures += 1
+            DIRECT.last_error = str(e)[:160]
             print(f"[musicola] {vid}: 'rapida' falló en {time.time() - t0:.1f}s ({str(e)[:150]})", flush=True)
+            _visitor["exp"] = 0  # la próxima vez, identificador de visitante nuevo
             if DIRECT.failures >= 3:
                 DIRECT.paused_until = time.time() + 30 * 60
                 DIRECT.failures = 0
@@ -913,6 +942,7 @@ async def healthz(request: Request):
             + f" ({st.ok} OK" + (f", media {st.total_s / st.ok:.1f}s" if st.ok else "") + ")"
             for st in [DIRECT, *STRATEGIES, FALLBACK]
         },
+        "ultimos_errores": {st.name: st.last_error for st in [DIRECT, *STRATEGIES, FALLBACK] if st.last_error},
         "memoria_mb": _mem_mb(),
         "audio_guardado": f"{len(AUDIO.meta)} canciones, {AUDIO.size() // 1048576} MB de {AUDIO.max // 1048576} MB"
         if AUDIO.enabled else "desactivado",
