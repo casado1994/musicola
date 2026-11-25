@@ -2,6 +2,7 @@ package com.musicola.app.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -120,12 +122,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Búsqueda ----
-    fun search() {
+    private var typingJob: Job? = null
+
+    /** Búsqueda mientras escribes (como Spotify): se lanza al dejar de escribir 0,45 s. */
+    fun onQueryChange(value: String) {
+        query = value
+        typingJob?.cancel()
+        if (value.trim().length < 3) return
+        typingJob = viewModelScope.launch {
+            delay(450)
+            search(typing = true)
+        }
+    }
+
+    fun search(typing: Boolean = false) {
         val q = query.trim()
         if (q.isEmpty()) return
+        if (!typing) typingJob?.cancel()
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            loading = true; message = null; results = emptyList()
+            message = null
+            if (!typing) results = emptyList() // al escribir, se mantienen los resultados hasta que llegan los nuevos
+            loading = results.isEmpty()
             try {
                 results = YouTube.search(q, onlySongs)
                 if (results.isEmpty()) message = "Sin resultados."
@@ -140,26 +158,53 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private var prefetchJob: Job? = null
 
+    /** ¿Conexión sin límite de datos (Wi-Fi)? Con datos móviles se precarga menos audio. */
+    private fun unmetered(): Boolean = runCatching {
+        !getApplication<Application>().getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
+    }.getOrDefault(false)
+
     /**
      * Precarga, como Spotify:
-     *  - los 5 primeros resultados: sus primeros segundos de AUDIO quedan en el móvil
-     *    (al pulsarlos suenan casi al instante);
-     *  - el resto: solo la dirección del audio (empiezan rápido, aunque no tanto).
+     *  - primeros segundos de AUDIO en el móvil: de todos los resultados con Wi-Fi,
+     *    de los 5 primeros con datos móviles (al pulsarlos suenan casi al instante);
+     *  - del resto, solo la dirección del audio (apenas gasta datos).
      */
     private fun prefetchResults(list: List<Track>) {
         prefetchJob?.cancel() // una búsqueda nueva sustituye a la anterior
-        prefetchJob = viewModelScope.launch(AudioCache.dispatcher) {
-            for (pair in list.take(5).chunked(2)) {
-                if (!isActive) break
-                pair.map { t -> async { AudioCache.prefetchStart(t.id) } }.awaitAll()
-            }
-            for (pair in list.drop(5).chunked(2)) {
-                if (!isActive) break
-                pair.map { t ->
-                    async { if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) } }
-                }.awaitAll()
-            }
+        prefetchJob = prefetchList(list)
+    }
+
+    private fun prefetchList(list: List<Track>): Job = viewModelScope.launch(AudioCache.dispatcher) {
+        val withAudio = if (unmetered()) list.size else 5
+        for (pair in list.take(withAudio).chunked(2)) {
+            if (!isActive) break
+            pair.map { t -> async { AudioCache.prefetchStart(t.id) } }.awaitAll()
         }
+        for (pair in list.drop(withAudio).chunked(2)) {
+            if (!isActive) break
+            pair.map { t ->
+                async { if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) } }
+            }.awaitAll()
+        }
+    }
+
+    private var tabJob: Job? = null
+
+    /** Al abrir Cola (1) o Favoritos (2), se preparan sus primeras canciones. */
+    fun prefetchTab(tab: Int) {
+        val list = when (tab) {
+            1 -> queue.drop(currentIndex.coerceAtLeast(0)).take(15)
+            2 -> favs.take(15)
+            else -> return
+        }
+        tabJob?.cancel()
+        tabJob = prefetchList(list)
+    }
+
+    /** Al tocar una canción (antes de levantar el dedo) se empieza a preparar. */
+    fun prefetchOne(t: Track) {
+        if (AudioCache.hasStart(t.id)) return
+        viewModelScope.launch(AudioCache.dispatcher) { AudioCache.prefetchStart(t.id) }
     }
 
     fun chooseOnlySongs(value: Boolean) {

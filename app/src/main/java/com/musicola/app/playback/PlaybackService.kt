@@ -166,10 +166,10 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------------------------------------------------------------- precarga
 
-    /** Prepara en segundo plano el audio de las 2 siguientes canciones, para que empiecen al instante. */
+    /** Prepara en segundo plano el audio de las 5 siguientes canciones, para que empiecen al instante. */
     private fun prefetchNext(p: Player) {
         val start = p.currentMediaItemIndex + 1
-        val ids = (start until minOf(start + 2, p.mediaItemCount))
+        val ids = (start until minOf(start + 5, p.mediaItemCount)) // las 5 siguientes
             .map { p.getMediaItemAt(it).mediaId }
             .filterNot { AudioCache.hasStart(it) }
         if (ids.isEmpty()) return

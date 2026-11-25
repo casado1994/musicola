@@ -1,6 +1,9 @@
 package com.musicola.app.ui
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +65,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -114,7 +118,7 @@ fun MusicolaScreen(vm: PlayerViewModel) {
                 TabRow(selectedTabIndex = tab, containerColor = Bg, contentColor = Accent) {
                     listOf("Resultados", "Cola (${vm.queue.size})", "Favoritos (${vm.favs.size})")
                         .forEachIndexed { i, label ->
-                            Tab(selected = tab == i, onClick = { tab = i },
+                            Tab(selected = tab == i, onClick = { tab = i; vm.prefetchTab(i) },
                                 text = { Text(label, fontSize = 13.sp, maxLines = 1) })
                         }
                 }
@@ -145,7 +149,7 @@ private fun SearchBar(vm: PlayerViewModel, onSearch: () -> Unit) {
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         OutlinedTextField(
             value = vm.query,
-            onValueChange = { vm.query = it },
+            onValueChange = { vm.onQueryChange(it) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Buscar canción, artista…") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
@@ -184,7 +188,7 @@ private fun ResultsList(vm: PlayerViewModel) {
     }
     LazyColumn(contentPadding = PaddingValues(8.dp)) {
         itemsIndexed(vm.results, key = { i, t -> "r$i${t.id}" }) { _, t ->
-            TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playNow(t) }) {
+            TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playNow(t) }, onPress = { vm.prefetchOne(t) }) {
                 SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
                 SmallAction(Icons.Default.QueuePlayNext, "Reproducir después") { vm.playNext(t) }
                 SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
@@ -203,7 +207,7 @@ private fun QueueList(vm: PlayerViewModel) {
         }
         LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
             itemsIndexed(vm.queue, key = { i, t -> "q$i${t.id}" }) { i, t ->
-                TrackRow(t, playing = i == vm.currentIndex, onClick = { vm.playAt(i) }) {
+                TrackRow(t, playing = i == vm.currentIndex, onClick = { vm.playAt(i) }, onPress = { vm.prefetchOne(t) }) {
                     SmallAction(Icons.Default.KeyboardArrowUp, "Subir") { vm.moveUp(i) }
                     SmallAction(Icons.Default.Close, "Quitar") { vm.removeAt(i) }
                 }
@@ -222,7 +226,7 @@ private fun FavsList(vm: PlayerViewModel) {
         }
         LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
             itemsIndexed(vm.favs, key = { _, t -> "f${t.id}" }) { i, t ->
-                TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playList(vm.favs, i) }) {
+                TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playList(vm.favs, i) }, onPress = { vm.prefetchOne(t) }) {
                     SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
                     SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
                     FavAction(vm, t)
@@ -237,12 +241,20 @@ private fun TrackRow(
     t: Track,
     playing: Boolean,
     onClick: () -> Unit,
+    onPress: () -> Unit = {},
     actions: @Composable () -> Unit,
 ) {
+    // Al tocar (antes de levantar el dedo) se empieza a preparar la canción
+    val interaction = remember { MutableInteractionSource() }
+    val currentOnPress by rememberUpdatedState(onPress)
+    LaunchedEffect(interaction) {
+        interaction.interactions.collect { if (it is PressInteraction.Press) currentOnPress() }
+    }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
             .background(if (playing) Color(0xFF2A1820) else Color.Transparent)
-            .clickable(onClick = onClick).padding(8.dp),
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, onClick = onClick)
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
