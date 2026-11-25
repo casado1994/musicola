@@ -15,6 +15,8 @@ import com.musicola.app.data.YouTube
 import com.musicola.app.playback.StreamResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -138,15 +140,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var prefetchJob: Job? = null
 
     /**
-     * Prepara en segundo plano el audio de los 3 primeros resultados (lo más probable es
-     * pulsar uno de ellos): así empiezan a sonar casi al instante.
+     * Prepara en segundo plano el audio de TODOS los resultados, en orden (primero los de
+     * arriba), de 2 en 2: así cualquiera que pulses empieza a sonar casi al instante.
+     * Solo se descargan los datos de cada canción (unos 100 KB), no el audio.
      */
     private fun prefetchResults(list: List<Track>) {
         prefetchJob?.cancel() // una búsqueda nueva sustituye a la anterior
         prefetchJob = viewModelScope.launch(Dispatchers.IO) {
-            for (t in list.take(3)) {
+            for (pair in list.chunked(2)) {
                 if (!isActive) break
-                if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) }
+                pair.map { t ->
+                    async { if (!StreamResolver.isCached(t.id)) runCatching { StreamResolver.resolve(t.id) } }
+                }.awaitAll()
             }
         }
     }
