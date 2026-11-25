@@ -719,6 +719,7 @@ async def _relay(up: httpx.Response, vid: str, offset: int, limit: int | None):
                 chunk = chunk[: limit - sent]
             if f:
                 f.write(chunk)
+                f.flush()  # visible al momento para quien esté leyendo el archivo a la vez
             sent += len(chunk)
             yield chunk
             if limit is not None and sent >= limit:
@@ -754,13 +755,17 @@ async def stream(vid: str, request: Request):
     # varias peticiones seguidas (primero 2 bytes, luego el resto): así solo la primera va a
     # YouTube y las demás salen al instante del almacén.
     if AUDIO.enabled and start < PREFETCH_BYTES and AUDIO.have(vid) <= start:
-        if vid in AUDIO.writing:  # ya se está precargando (p. ej. desde la búsqueda): se espera un poco
-            for _ in range(100):
-                if AUDIO.have(vid) > start or vid not in AUDIO.writing:
-                    break
-                await asyncio.sleep(0.05)
-        else:
-            await _prefetch_audio(vid)
+        # Se lanza la precarga (si no estaba en marcha) y se responde en cuanto llega el
+        # primer trozo, sin esperar a los 256 KB enteros: el resto se envía según llega.
+        task = None
+        if vid not in AUDIO.writing:
+            task = asyncio.create_task(_prefetch_audio(vid))
+        for _ in range(300):  # hasta 15 s
+            if AUDIO.have(vid) > start or (task and task.done()):
+                break
+            if not task and vid not in AUDIO.writing:
+                break
+            await asyncio.sleep(0.02)
 
     meta = AUDIO.info(vid)
     have = AUDIO.have(vid)
@@ -773,9 +778,19 @@ async def stream(vid: str, request: Request):
                    "content-length": str(last - start + 1), "cache-control": "no-store"}
 
         async def body():
-            from_file_end = min(have, last + 1)
-            for chunk in _read_file(vid, start, from_file_end):
-                yield chunk
+            pos = start
+            # Lo guardado, siguiendo el archivo mientras la precarga lo va llenando
+            while pos <= last:
+                avail = min(AUDIO.have(vid), last + 1)
+                if avail > pos:
+                    for chunk in _read_file(vid, pos, avail):
+                        yield chunk
+                    pos = avail
+                    continue
+                if vid not in AUDIO.writing:
+                    break
+                await asyncio.sleep(0.02)
+            from_file_end = pos
             if from_file_end <= last:  # falta el resto: se pide a YouTube desde donde acaba lo guardado
                 up, _, _ = await _open_upstream(client, vid, from_file_end, last)
                 async for chunk in _relay(up, vid, from_file_end, last - from_file_end + 1):

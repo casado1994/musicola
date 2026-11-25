@@ -425,8 +425,19 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
 });
 
+// Prepara en el servidor la canción actual y las siguientes (al abrir la web y al volver a
+// ella: iOS pausa las páginas en segundo plano). Así, al pulsar ▶ empieza al instante.
+function warmCurrent() {
+  const t = current();
+  if (t) prefetch(t.id, true);
+  prefetchNext();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && audio.paused) warmCurrent();
+});
+
 // Arranque: restaura la última canción (sin reproducir automáticamente)
-if (current()) playIndex(state.index, false);
+if (current()) { playIndex(state.index, false); warmCurrent(); }
 renderAll();
 setStatus(state.queue.length ? "" : "Busca algo para empezar");
 
