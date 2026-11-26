@@ -793,6 +793,7 @@ def _read_file(vid: str, start: int, end_excl: int):
 # sacada del índice "sidx" que YouTube pone al principio del archivo. Así Safari pide el
 # primer fragmento y empieza a sonar, sin recorrer nada.
 import struct
+import mp4split
 
 
 def _mp4_index(head: bytes):
@@ -838,6 +839,38 @@ def _mp4_index(head: bytes):
     return None
 
 
+_hls_cache: dict[str, list] = {}
+
+
+def _hls_parts(vid: str, init_end: int, segs: list):
+    """Trozos de ~2 s del primer fragmento (o None si no se puede: se usa el fragmento entero)."""
+    if vid in _hls_cache:
+        return _hls_cache[vid]
+    parts = None
+    off, length, _ = segs[0]
+    if AUDIO.have(vid) >= off + length:
+        try:
+            with open(AUDIO.path(vid), "rb") as f:
+                buf = f.read(off + length)
+            res = mp4split.split_first_fragment(buf, init_end, off, length, 2.0)
+            parts = res[0] if res else None
+        except Exception as e:
+            print(f"[musicola] no se pudo trocear {vid}: {e}", flush=True)
+    _hls_cache[vid] = parts
+    _trim(_hls_cache, 60)
+    return parts
+
+
+@app.get("/api/hls/{vid}/p{n}.m4s")
+async def hls_part(vid: str, n: int):
+    if not ID_RE.match(vid):
+        raise HTTPException(400, "ID no válido")
+    parts = _hls_cache.get(vid)
+    if not parts or not (0 <= n < len(parts)):
+        raise HTTPException(404, "Trozo no disponible")
+    return Response(parts[n][0], media_type="audio/mp4", headers={"cache-control": "no-store"})
+
+
 @app.get("/api/hls/{vid}.m3u8")
 async def hls_playlist(vid: str, request: Request):
     if not ID_RE.match(vid):
@@ -858,14 +891,22 @@ async def hls_playlist(vid: str, request: Request):
         raise HTTPException(415, "Este audio no tiene índice: se usa la reproducción normal")
     init_end, segs = idx
     tok = request.query_params.get("t")
-    uri = f"/api/stream/{vid}" + (f"?t={tok}" if tok else "")
+    q = f"?t={tok}" if tok else ""
+    uri = f"/api/stream/{vid}" + q
+    # El primer fragmento (~10 s) se trocea en partes de ~2 s: Safari arranca bajando menos datos
+    parts = _hls_parts(vid, init_end, segs)
     lines = [
         "#EXTM3U", "#EXT-X-VERSION:7",
         f"#EXT-X-TARGETDURATION:{max(1, int(max(d for _, _, d in segs) + 0.999))}",
         "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS",
         f'#EXT-X-MAP:URI="{uri}",BYTERANGE="{init_end}@0"',
     ]
-    for off, length, dur in segs:
+    rest = segs
+    if parts:
+        for n, (_, dur) in enumerate(parts):
+            lines += [f"#EXTINF:{dur:.3f},", f"/api/hls/{vid}/p{n}.m4s{q}"]
+        rest = segs[1:]
+    for off, length, dur in rest:
         lines += [f"#EXTINF:{dur:.3f},", f"#EXT-X-BYTERANGE:{length}@{off}", uri]
     lines.append("#EXT-X-ENDLIST")
     return Response("\n".join(lines) + "\n", media_type="application/vnd.apple.mpegurl",
