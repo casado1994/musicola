@@ -300,7 +300,7 @@ $("#btn-radio").onclick = () => {
 function prefetchNext() {
   // Las dos siguientes de la cola
   // Las dos siguientes: el servidor guarda sus primeros segundos de audio
-  prefetchMany(state.queue.slice(state.index + 1, state.index + 6).map((t) => t.id));
+  prefetchMany(state.queue.slice(state.index + 1, state.index + 3).map((t) => t.id));
 }
 const prefetched = new Set();
 // Pide al servidor que prepare varias canciones (en ese orden; lo último pedido va primero)
@@ -410,8 +410,8 @@ document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   for (const id of ["results", "queue", "favs"]) $("#" + id).classList.toggle("hidden", id !== b.dataset.tab);
   currentTab = b.dataset.tab; updateQueueBar();
   // Al mirar la cola o los favoritos, se preparan sus canciones
-  if (b.dataset.tab === "queue") prefetchMany(state.queue.slice(Math.max(0, state.index), state.index + 15).map((t) => t.id));
-  if (b.dataset.tab === "favs") prefetchMany(state.favs.slice(0, 15).map((t) => t.id));
+  if (b.dataset.tab === "queue") prefetchMany(state.queue.slice(Math.max(0, state.index), state.index + 6).map((t) => t.id));
+  if (b.dataset.tab === "favs") prefetchMany(state.favs.slice(0, 6).map((t) => t.id));
   setStatus(b.dataset.tab === "favs" && !state.favs.length ? "Aún no tienes favoritos." : "");
 });
 
@@ -438,7 +438,11 @@ async function runSearch(q, { typing = false } = {}) {
     if (seq !== searchSeq) return;
     state.results = results;
     // Como Spotify: el servidor prepara los primeros segundos de TODOS los resultados, de arriba abajo
-    prefetchMany(state.results.map((t) => t.id));
+    // Los 6 primeros (con más, YouTube nos toma por bot). Si se está escribiendo, solo cuando
+    // los resultados llevan 1,5 s sin cambiar, para no precargar cada letra.
+    const ids = state.results.slice(0, 6).map((t) => t.id);
+    if (typing) setTimeout(() => { if (seq === searchSeq) prefetchMany(ids); }, 1500);
+    else prefetchMany(ids);
     setStatus(state.results.length ? "" : "Sin resultados.");
   } catch (err) { if (seq === searchSeq) setStatus("Error: " + err.message); }
   renderAll();
@@ -499,7 +503,7 @@ function warmCurrent() {
   const t = current();
   if (t) prefetch(t.id, true);
   prefetchNext();
-  if (state.results.length) setTimeout(() => prefetchMany(state.results.map((r) => r.id)), 1500);
+  if (state.results.length) setTimeout(() => prefetchMany(state.results.slice(0, 6).map((r) => r.id)), 1500);
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && audio.paused) warmCurrent();

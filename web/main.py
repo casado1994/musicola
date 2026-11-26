@@ -1058,7 +1058,7 @@ async def prefetch(vid: str, audio: int = 0):
 # precargas (como mucho, detrás de la que está en curso). Lo último pedido va primero.
 _pending: list[str] = []
 _pending_event = asyncio.Event()
-MAX_PENDING = 40
+MAX_PENDING = 12
 
 
 def _enqueue_prefetch(ids: list[str]):
@@ -1069,14 +1069,27 @@ def _enqueue_prefetch(ids: list[str]):
         _pending_event.set()
 
 
+def _youtube_blocking() -> bool:
+    """¿YouTube nos está pidiendo "demostrar que no somos un bot"? Entonces no hay que insistir."""
+    errs = [st.last_error.lower() for st in [DIRECT, *STRATEGIES] if st.last_error]
+    vias_ok = DIRECT.available() or any(st.available() for st in STRATEGIES)
+    return (not vias_ok) and any("bot" in e for e in errs)
+
+
 async def _prefetch_worker():
     while True:
         await _pending_event.wait()
         while _pending:
+            if _youtube_blocking():
+                # YouTube nos ha bloqueado: se descartan las precargas para no empeorarlo
+                _pending.clear()
+                break
             vid = _pending.pop(0)
             if AUDIO.have(vid) >= PREFETCH_BYTES or vid in AUDIO.writing:
                 continue
             await _prefetch_audio(vid)
+            # Ritmo prudente: muchas peticiones seguidas desde una IP hacen que YouTube nos tome por bot
+            await asyncio.sleep(1.0)
         _pending_event.clear()
 
 
