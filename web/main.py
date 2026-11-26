@@ -650,7 +650,7 @@ CHUNK = 64 * 1024
 
 # ---- Almacén de audio en el servidor (como Spotify) ----
 # Cada canción se guarda como un archivo con sus primeros N bytes seguidos (de 0 en adelante).
-#  - La precarga guarda los primeros ~256 KB (10-15 s): al pulsar, el servidor los envía al
+#  - La precarga guarda los primeros ~512 KB (~30 s): al pulsar, el servidor los envía al
 #    instante y pide el resto a YouTube mientras tanto.
 #  - Al escuchar una canción entera, queda guardada completa: la próxima vez no se pide a YouTube.
 # Límite: AUDIO_CACHE_MB (300 por defecto); al llenarse se borra lo escuchado hace más tiempo.
@@ -712,7 +712,7 @@ class AudioStore:
 
 AUDIO = AudioStore(os.environ.get("AUDIO_CACHE_DIR", "/tmp/musicola-audio"),
                    int(os.environ.get("AUDIO_CACHE_MB", "300")) * 1024 * 1024)
-PREFETCH_BYTES = 256 * 1024
+PREFETCH_BYTES = 512 * 1024  # ~3 fragmentos de 10 s: lo que Safari (HLS) descarga antes de empezar
 
 
 def _parse_range(h: str | None):
