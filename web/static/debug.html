@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Musicola · Diagnóstico</title>
+<style>
+ body{font:13px system-ui,sans-serif;background:#0f0f12;color:#ececf1;margin:0;padding:14px}
+ h2{font-size:16px;margin:18px 0 6px;color:#ff4d6d} p{color:#8b8b96;margin:4px 0 10px}
+ .wrap{overflow-x:auto} table{border-collapse:collapse;white-space:nowrap}
+ th,td{border-bottom:1px solid #2a2a31;padding:5px 8px;text-align:left} th{color:#8b8b96;font-weight:500}
+ td.n{text-align:right;font-variant-numeric:tabular-nums} button{background:#ff4d6d;color:#fff;border:0;border-radius:8px;padding:8px 14px}
+ a{color:#ff4d6d}
+</style></head><body>
+<button onclick="cargar()">Actualizar</button> <a href="/">← Volver a Musicola</a>
+<h2>Reproductor (ms desde que pulsas)</h2>
+<p>playing = empieza a sonar. loadedmetadata = el navegador ya sabe la duración.</p>
+<div class="wrap"><table id="c"></table></div>
+<h2>Servidor (peticiones de audio)</h2>
+<p>espera = hasta empezar a responder · primer byte = hasta enviar el primer dato · origen = almacén o YouTube</p>
+<div class="wrap"><table id="s"></table></div>
+<script>
+const token = localStorage.getItem("token") || "";
+function tabla(el, rows, cols) {
+  const h = "<tr>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr>";
+  el.innerHTML = h + rows.map(r => "<tr>" + cols.map(c => {
+    const v = r[c] ?? ""; return `<td class="${typeof v === "number" ? "n" : ""}">${String(v).replace(/</g, "&lt;")}</td>`;
+  }).join("") + "</tr>").join("");
+}
+async function cargar() {
+  const r = await fetch("/api/debug" + (token ? "?t=" + encodeURIComponent(token) : ""));
+  if (!r.ok) { document.body.insertAdjacentHTML("beforeend", "<p>Error " + r.status + " (¿contraseña?)</p>"); return; }
+  const d = await r.json();
+  tabla(document.getElementById("c"), d.reproductor, ["hora", "navegador", "cancion", "loadstart", "progress", "loadedmetadata", "canplay", "playing", "waiting", "error"]);
+  tabla(document.getElementById("s"), d.servidor, ["hora", "navegador", "video", "rango", "guardado_kb", "origen", "espera_ms", "primer_byte_ms", "kb_enviados", "total_ms"]);
+}
+cargar();
+</script></body></html>

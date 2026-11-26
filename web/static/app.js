@@ -99,10 +99,29 @@ function renderAll() {
 }
 
 // ---------- Reproducción ----------
+// ---------- Diagnóstico: tiempos desde que pulsas hasta que suena (página /debug) ----------
+let diag = null;
+function diagStart(t) {
+  diag = { cancion: t.title.slice(0, 40), t0: performance.now(), ms: {} };
+}
+function diagMark(ev) {
+  if (!diag || diag.ms[ev] != null) return;
+  diag.ms[ev] = Math.round(performance.now() - diag.t0);
+  if (ev === "playing" || ev === "error") {
+    const body = JSON.stringify({ cancion: diag.cancion, ...diag.ms });
+    diag = null;
+    fetch(withToken("/api/debug/client"), { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
+  }
+}
+for (const ev of ["loadstart", "progress", "loadedmetadata", "loadeddata", "canplay", "canplaythrough", "playing", "waiting", "error"]) {
+  audio.addEventListener(ev, () => diagMark(ev));
+}
+
 function playIndex(i, autoplay = true) {
   if (i < 0 || i >= state.queue.length) return;
   state.index = i;
   const t = current();
+  if (autoplay) diagStart(t);
   // Al restaurar la última canción no se descarga nada hasta pulsar play
   audio.preload = autoplay ? "auto" : "none";
   audio.src = withToken(`/api/stream/${t.id}`);

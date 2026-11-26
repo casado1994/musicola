@@ -786,12 +786,52 @@ def _read_file(vid: str, start: int, end_excl: int):
             yield data
 
 
+# ---- Diagnóstico: qué piden los navegadores y cuánto tarda (página /debug) ----
+import collections
+_debug_server = collections.deque(maxlen=80)
+_debug_client = collections.deque(maxlen=40)
+
+
+def _browser_name(ua: str) -> str:
+    if "iPhone" in ua or "iPad" in ua:
+        return "Chrome iPhone" if "CriOS" in ua else "Safari iPhone"
+    if "Android" in ua:
+        return "Android"
+    if "Edg/" in ua:
+        return "Edge"
+    if "Chrome/" in ua:
+        return "Chrome"
+    if "Safari/" in ua:
+        return "Safari Mac"
+    return ua[:30]
+
+
+def _traced(gen, entry: dict, t0: float):
+    async def wrapped():
+        n = 0
+        try:
+            async for chunk in gen:
+                if n == 0:
+                    entry["primer_byte_ms"] = round((time.time() - t0) * 1000)
+                n += len(chunk)
+                yield chunk
+        finally:
+            entry["kb_enviados"] = n // 1024
+            entry["total_ms"] = round((time.time() - t0) * 1000)
+    return wrapped()
+
+
 @app.get("/api/stream/{vid}")
 async def stream(vid: str, request: Request):
     if not ID_RE.match(vid):
         raise HTTPException(400, "ID no válido")
     client: httpx.AsyncClient = request.app.state.http
     start, end = _parse_range(request.headers.get("range"))
+    t0 = time.time()
+    entry = {"hora": time.strftime("%H:%M:%S"), "video": vid,
+             "navegador": _browser_name(request.headers.get("user-agent", "")),
+             "rango": request.headers.get("range", "(todo)"), "guardado_kb": AUDIO.have(vid) // 1024}
+    _debug_server.appendleft(entry)
     # Si piden el principio de una canción no guardada, se guardan primero sus primeros segundos
     # y se contesta desde ahí. Safari (iPhone) y otros navegadores móviles piden el audio en
     # varias peticiones seguidas (primero 2 bytes, luego el resto): así solo la primera va a
@@ -838,14 +878,18 @@ async def stream(vid: str, request: Request):
                 async for chunk in _relay(up, vid, from_file_end, last - from_file_end + 1):
                     yield chunk
 
-        return StreamingResponse(body(), status_code=206, media_type=meta["mime"], headers=headers)
+        entry["origen"] = "almacén" + (" + YouTube" if have <= last else "")
+        entry["espera_ms"] = round((time.time() - t0) * 1000)
+        return StreamingResponse(_traced(body(), entry, t0), status_code=206, media_type=meta["mime"], headers=headers)
 
     # 2) Nada guardado en ese punto: directo de YouTube (guardando si continúa lo que ya hay)
     up, info, total = await _open_upstream(client, vid, start, end)
     out_headers = {k: up.headers[k] for k in PASS_HEADERS if k in up.headers}
     out_headers.setdefault("accept-ranges", "bytes")
     out_headers["cache-control"] = "no-store"
-    return StreamingResponse(_relay(up, vid, start, None), status_code=up.status_code,
+    entry["origen"] = "YouTube"
+    entry["espera_ms"] = round((time.time() - t0) * 1000)
+    return StreamingResponse(_traced(_relay(up, vid, start, None), entry, t0), status_code=up.status_code,
                              media_type=info["mime"], headers=out_headers)
 
 
@@ -968,6 +1012,28 @@ async def upload_cookies(request: Request):
     for st in [DIRECT, *STRATEGIES, FALLBACK]:
         st.failures, st.paused_until = 0, 0.0
     return {"ok": True, "persistente": PERSISTENT}
+
+
+@app.post("/api/debug/client")
+async def debug_client(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "JSON no válido")
+    data["navegador"] = _browser_name(request.headers.get("user-agent", ""))
+    data["hora"] = time.strftime("%H:%M:%S")
+    _debug_client.appendleft({k: data[k] for k in list(data)[:20]})
+    return {"ok": True}
+
+
+@app.get("/api/debug")
+async def debug_data():
+    return {"reproductor": list(_debug_client), "servidor": list(_debug_server)}
+
+
+@app.get("/debug")
+async def debug_page():
+    return FileResponse(os.path.join(STATIC_DIR, "debug.html"))
 
 
 @app.get("/healthz")
