@@ -117,6 +117,16 @@ for (const ev of ["loadstart", "progress", "loadedmetadata", "loadeddata", "canp
   audio.addEventListener(ev, () => diagMark(ev));
 }
 
+// Safari (y cualquier navegador del iPhone/iPad) recorre todo el audio de YouTube antes de
+// reproducirlo. Con HLS, su formato nativo, empieza en cuanto tiene el primer fragmento.
+const IS_APPLE_WEBKIT = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.vendor === "Apple Computer, Inc." && !/Chrome|CriOS|FxiOS|Edg/.test(navigator.userAgent));
+const USE_HLS = IS_APPLE_WEBKIT && audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+const hlsFailed = new Set(); // canciones sin índice: se reproducen de la forma normal
+function audioUrl(id) {
+  return withToken(USE_HLS && !hlsFailed.has(id) ? `/api/hls/${id}.m3u8` : `/api/stream/${id}`);
+}
+
 function playIndex(i, autoplay = true) {
   if (i < 0 || i >= state.queue.length) return;
   state.index = i;
@@ -124,7 +134,7 @@ function playIndex(i, autoplay = true) {
   if (autoplay) diagStart(t);
   // Al restaurar la última canción no se descarga nada hasta pulsar play
   audio.preload = autoplay ? "auto" : "none";
-  audio.src = withToken(`/api/stream/${t.id}`);
+  audio.src = audioUrl(t.id);
   if (autoplay) { setLoading(true); audio.play().catch(() => {}); }
   updateMediaSession(t);
   persist(); renderAll();
@@ -230,6 +240,8 @@ audio.addEventListener("error", async () => {
   setLoading(false);
   const t = current();
   if (!t) return;
+  // Si falló con HLS, se reintenta al momento de la forma normal
+  if (USE_HLS && !hlsFailed.has(t.id)) { hlsFailed.add(t.id); playIndex(state.index); return; }
   // Pregunta al servidor el motivo exacto del fallo
   let why = "";
   try {

@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import httpx
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
@@ -784,6 +784,92 @@ def _read_file(vid: str, start: int, end_excl: int):
                 break
             left -= len(data)
             yield data
+
+
+# ---- HLS para Safari ----
+# El audio de YouTube viene troceado en fragmentos (MP4 fragmentado). Chrome lo reproduce
+# directamente, pero Safari recorre TODOS los fragmentos antes de empezar (unos 6 s).
+# Solución: dar a Safari una lista HLS (su formato nativo) que dice dónde está cada fragmento,
+# sacada del índice "sidx" que YouTube pone al principio del archivo. Así Safari pide el
+# primer fragmento y empieza a sonar, sin recorrer nada.
+import struct
+
+
+def _mp4_index(head: bytes):
+    """Devuelve (fin_de_cabecera, [(offset, tamaño, segundos), ...]) a partir del índice sidx."""
+    i, init_end = 0, None
+    while i + 8 <= len(head):
+        size, typ = struct.unpack(">I4s", head[i:i + 8])
+        if size == 1 and i + 16 <= len(head):
+            size = struct.unpack(">Q", head[i + 8:i + 16])[0]
+        if size < 8:
+            return None
+        if typ == b"sidx":
+            if i + size > len(head):
+                return None
+            init_end = init_end or i
+            b = head[i + 8:i + size]
+            version = b[0]
+            timescale = struct.unpack(">I", b[8:12])[0]
+            if version == 0:
+                first_offset = struct.unpack(">I", b[16:20])[0]
+                p = 20
+            else:
+                first_offset = struct.unpack(">Q", b[20:28])[0]
+                p = 28
+            count = struct.unpack(">H", b[p + 2:p + 4])[0]
+            p += 4
+            offset = i + size + first_offset
+            segs = []
+            for _ in range(count):
+                ref, dur = struct.unpack(">II", b[p:p + 8])
+                p += 12
+                if ref >> 31:  # referencia a otro índice: no soportado
+                    return None
+                length = ref & 0x7FFFFFFF
+                segs.append((offset, length, dur / timescale))
+                offset += length
+            return init_end, segs
+        if typ == b"moof":
+            return None  # fragmentos sin índice previo
+        if typ in (b"ftyp", b"moov", b"free", b"styp"):
+            pass
+        i += size
+    return None
+
+
+@app.get("/api/hls/{vid}.m3u8")
+async def hls_playlist(vid: str, request: Request):
+    if not ID_RE.match(vid):
+        raise HTTPException(400, "ID no válido")
+    if AUDIO.have(vid) < 16384:
+        await _prefetch_audio(vid)  # la cabecera y el índice están en los primeros KB
+        for _ in range(200):  # por si otra precarga lo está escribiendo
+            if AUDIO.have(vid) >= 16384 or vid not in AUDIO.writing:
+                break
+            await asyncio.sleep(0.02)
+    have = AUDIO.have(vid)
+    if have < 1024:
+        raise HTTPException(502, "No se pudo obtener el audio")
+    with open(AUDIO.path(vid), "rb") as f:
+        head = f.read(min(have, PREFETCH_BYTES))
+    idx = _mp4_index(head)
+    if not idx:
+        raise HTTPException(415, "Este audio no tiene índice: se usa la reproducción normal")
+    init_end, segs = idx
+    tok = request.query_params.get("t")
+    uri = f"/api/stream/{vid}" + (f"?t={tok}" if tok else "")
+    lines = [
+        "#EXTM3U", "#EXT-X-VERSION:7",
+        f"#EXT-X-TARGETDURATION:{max(1, int(max(d for _, _, d in segs) + 0.999))}",
+        "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS",
+        f'#EXT-X-MAP:URI="{uri}",BYTERANGE="{init_end}@0"',
+    ]
+    for off, length, dur in segs:
+        lines += [f"#EXTINF:{dur:.3f},", f"#EXT-X-BYTERANGE:{length}@{off}", uri]
+    lines.append("#EXT-X-ENDLIST")
+    return Response("\n".join(lines) + "\n", media_type="application/vnd.apple.mpegurl",
+                    headers={"cache-control": "no-store"})
 
 
 # ---- Diagnóstico: qué piden los navegadores y cuánto tarda (página /debug) ----
