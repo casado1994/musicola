@@ -518,7 +518,10 @@ $("#q").addEventListener("input", () => {
 
 // ---------- Volumen ----------
 const volume = { level: load("volume", 1), muted: load("muted", false) };
+// En móvil (pantalla táctil) no hay barra de volumen: manda el volumen del teléfono
+const IS_TOUCH = matchMedia("(hover: none) and (pointer: coarse)").matches;
 function applyVolume() {
+  if (IS_TOUCH) { audio.volume = 1; audio.muted = false; return; }
   audio.volume = volume.level;
   audio.muted = volume.muted || volume.level === 0;
   const shown = audio.muted ? 0 : volume.level;

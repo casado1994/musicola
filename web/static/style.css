@@ -99,3 +99,6 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 .chip.on { background: #2a1820; border-color: var(--accent); color: var(--text); }
 #btn-share { color: var(--muted); }
 #btn-share:hover { color: var(--text); }
+
+/* El volumen solo en escritorio: en móvil se usan los botones del teléfono */
+@media (hover: none) and (pointer: coarse) { .volume { display: none; } }
