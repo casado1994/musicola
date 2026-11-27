@@ -150,3 +150,10 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 #btn-addlist { color: var(--muted); }
 #btn-addlist:hover { color: var(--text); }
+
+.shared-preview { list-style: none; margin: 8px 0 0; padding: 0; }
+.shared-preview li { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.shared-preview li:last-child { border-bottom: 0; }
+.shared-preview .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shared-preview .sub { color: var(--muted); font-size: 12px; }
+.pl-head .icon.small { padding: 4px 6px; }

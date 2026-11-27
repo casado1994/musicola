@@ -606,6 +606,8 @@ if (current()) { playIndex(state.index, false); warmCurrent(); }
 }
 renderAll();
 setStatus(state.queue.length ? "" : "Busca algo para empezar");
+// Lista compartida (#list=…): se abre al cargar (se define al final del archivo)
+setTimeout(() => openSharedPlaylistFromHash(), 0);
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
@@ -680,6 +682,7 @@ $("#pl-rename").onclick = () => {
   const pl = openPlaylist();
   askName("Renombrar lista", pl.name, "Guardar", (name) => { pl.name = name.trim(); persist(); renderAll(); });
 };
+$("#pl-share").onclick = () => sharePlaylist(openPlaylist());
 $("#pl-delete").onclick = () => {
   const pl = openPlaylist();
   if (!confirm(`¿Eliminar la lista «${pl.name}»?`)) return;
@@ -769,3 +772,73 @@ function openAddToList(t) {
   };
 }
 renderAll();
+
+// ---------- Compartir listas ----------
+// La lista viaja dentro del propio enlace (#list=…), comprimida: no se guarda nada en el servidor
+// y el enlace funciona aunque el servidor se reinicie.
+const b64url = (bytes) => { let s = ""; for (const b of bytes) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const unb64url = (str) => Uint8Array.from(atob(str.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function pipeBytes(bytes, stream) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+}
+async function encodePlaylist(pl) {
+  const data = JSON.stringify({ n: pl.name, t: pl.tracks.map((t) => [t.id, t.title, t.channel || "", Math.round(t.duration || 0)]) });
+  const bytes = new TextEncoder().encode(data);
+  if (typeof CompressionStream === "function") {
+    try { return "z" + b64url(await pipeBytes(bytes, new CompressionStream("deflate-raw"))); } catch {}
+  }
+  return "j" + b64url(bytes);
+}
+async function decodePlaylist(code) {
+  let bytes = unb64url(code.slice(1));
+  if (code[0] === "z") bytes = await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
+  const d = JSON.parse(new TextDecoder().decode(bytes));
+  const tracks = (d.t || []).filter((x) => Array.isArray(x) && /^[\w-]{11}$/.test(x[0])).map(([id, title, channel, duration]) =>
+    ({ id, title: String(title || ""), channel: String(channel || ""), duration: +duration || 0, thumb: `https://i.ytimg.com/vi/${id}/mqdefault.jpg` }));
+  return { name: String(d.n || "Lista compartida").slice(0, 80), tracks };
+}
+
+async function sharePlaylist(pl) {
+  if (!pl) return;
+  if (!pl.tracks.length) return toast("La lista está vacía");
+  const url = `${location.origin}/#list=${await encodePlaylist(pl)}`;
+  const text = `Lista «${pl.name}» · ${nCanciones(pl.tracks.length)}`;
+  try {
+    if (navigator.share) await navigator.share({ title: pl.name, text, url });
+    else { await navigator.clipboard.writeText(`${text}\n${url}`); toast("Enlace de la lista copiado"); }
+  } catch (e) {
+    if (e.name !== "AbortError") prompt("Copia este enlace:", url);
+  }
+}
+
+async function openSharedPlaylistFromHash() {
+  const m = location.hash.match(/^#list=([zj][\w-]+)$/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  let shared;
+  try { shared = await decodePlaylist(m[1]); } catch { return toast("El enlace de la lista no es válido"); }
+  if (!shared.tracks.length) return toast("La lista compartida está vacía");
+  const preview = shared.tracks.slice(0, 5).map((t) => `<li><span class="title">${esc(t.title)}</span><span class="sub">${esc(t.channel)}</span></li>`).join("");
+  openSheet(`
+    <h2>Lista compartida</h2>
+    <div class="sheet-sub">«${esc(shared.name)}» · ${nCanciones(shared.tracks.length)}</div>
+    <ul class="shared-preview">${preview}${shared.tracks.length > 5 ? `<li class="sub">y ${shared.tracks.length - 5} más…</li>` : ""}</ul>
+    <div class="sheet-actions">
+      <button class="text-btn" data-close>Cerrar</button>
+      <button class="text-btn" data-sh="play">Reproducir</button>
+      <button class="text-btn accent" data-sh="save">Guardar lista</button>
+    </div>`);
+  prefetchMany(shared.tracks.slice(0, 3).map((t) => t.id));
+  $("#sheet-body").onclick = (e) => {
+    const b = e.target.closest("[data-sh]"); if (!b) return;
+    closeSheet();
+    if (b.dataset.sh === "play") return playPlaylist(shared);
+    const exists = state.playlists.some((p) => p.name === shared.name);
+    const pl = { id: "p" + Date.now().toString(36), name: exists ? `${shared.name} (compartida)` : shared.name, tracks: shared.tracks };
+    state.playlists.unshift(pl);
+    openListId = pl.id; persist(); renderAll();
+    document.querySelector('.tabs button[data-tab="lists"]').click();
+    toast(`Lista «${pl.name}» guardada`);
+  };
+}
+addEventListener("hashchange", openSharedPlaylistFromHash);
