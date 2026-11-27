@@ -464,16 +464,37 @@ async function shareTrack(t) {
   if (!t) return;
   const url = `${location.origin}/?v=${t.id}`;
   const text = `${t.title}${t.channel ? " – " + t.channel : ""}`;
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: t.title, text, url }); // menú de compartir del sistema (iPhone, Android…)
-    } else {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
-      setStatus("Enlace copiado: pégalo donde quieras");
-    }
-  } catch (e) {
-    if (e.name !== "AbortError") prompt("Copia este enlace:", url);
+  return shareLink({ title: t.title, text, url, label: "Compartir canción" });
+}
+
+// En móvil se usa el menú de compartir del sistema (WhatsApp, Mensajes…).
+// En escritorio (Windows, Mac, Linux) ese menú falla o no sirve de mucho: se copia el enlace
+// y se muestra en una ventana con botón «Copiar» por si el navegador no deja copiar solo.
+async function shareLink({ title, text, url, label }) {
+  if (IS_TOUCH && navigator.share) {
+    try { await navigator.share({ title, text, url }); return; }
+    catch (e) { if (e.name === "AbortError") return; } // cancelado por el usuario
   }
+  let copied = false;
+  try { await navigator.clipboard.writeText(url); copied = true; } catch {}
+  openSheet(`
+    <h2>${esc(label)}</h2>
+    <div class="sheet-sub">${esc(text)}</div>
+    <input id="share-url" class="share-url" type="text" readonly value="${esc(url)}">
+    <div class="sheet-actions">
+      <button class="text-btn" data-close>Cerrar</button>
+      <button id="share-copy" class="text-btn accent">${copied ? "¡Copiado!" : "Copiar enlace"}</button>
+    </div>`);
+  const input = $("#share-url");
+  input.onclick = () => input.select();
+  setTimeout(() => input.select(), 30);
+  $("#share-copy").onclick = async () => {
+    input.select();
+    let ok = false;
+    try { await navigator.clipboard.writeText(url); ok = true; } catch { ok = document.execCommand && document.execCommand("copy"); }
+    $("#share-copy").textContent = ok ? "¡Copiado!" : "Pulsa Ctrl+C";
+  };
+  if (copied) toast("Enlace copiado");
 }
 $("#btn-share").onclick = () => shareTrack(current());
 $("#btn-addlist").onclick = () => { const t = current(); if (t) openAddToList(t); };
@@ -803,12 +824,7 @@ async function sharePlaylist(pl) {
   if (!pl.tracks.length) return toast("La lista está vacía");
   const url = `${location.origin}/#list=${await encodePlaylist(pl)}`;
   const text = `Lista «${pl.name}» · ${nCanciones(pl.tracks.length)}`;
-  try {
-    if (navigator.share) await navigator.share({ title: pl.name, text, url });
-    else { await navigator.clipboard.writeText(`${text}\n${url}`); toast("Enlace de la lista copiado"); }
-  } catch (e) {
-    if (e.name !== "AbortError") prompt("Copia este enlace:", url);
-  }
+  return shareLink({ title: pl.name, text, url, label: "Compartir lista" });
 }
 
 async function openSharedPlaylistFromHash() {
