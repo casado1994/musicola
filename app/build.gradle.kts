@@ -12,8 +12,8 @@ android {
         applicationId = "com.musicola.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = "1.9"
     }
 
     // Clave fija incluida en el repo: así cada APK nuevo se instala encima del anterior

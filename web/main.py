@@ -1242,6 +1242,19 @@ def _mem_mb():
         return None
 
 
+# Digital Asset Links: permite que Android abra los enlaces de Musicola directamente en el APK
+ASSET_LINKS = [{
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {"namespace": "android_app", "package_name": "com.musicola.app",
+               "sha256_cert_fingerprints": ["97:D5:D4:26:74:88:7D:2E:49:F4:4B:1E:83:15:D1:3D:22:55:96:75:57:5B:67:F8:56:E9:21:1F:D2:65:89:EA"]},
+}]
+
+
+@app.get("/.well-known/assetlinks.json")
+async def assetlinks():
+    return JSONResponse(ASSET_LINKS)
+
+
 @app.get("/")
 async def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))

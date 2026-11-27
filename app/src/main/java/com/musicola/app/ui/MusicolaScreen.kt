@@ -161,6 +161,7 @@ fun MusicolaScreen(vm: PlayerViewModel) {
                 if (vm.current != null) PlayerBar(vm, onAddToList)
             }
             addTarget?.let { t -> AddToPlaylistDialog(vm, t) { addTarget = null } }
+            vm.sharedPlaylist?.let { pl -> SharedPlaylistDialog(vm, pl) { tab = 3 } }
         }
     }
 }
@@ -546,6 +547,7 @@ private fun PlaylistDetail(vm: PlayerViewModel, pl: Playlist, onBack: () -> Unit
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     BackHandler(onBack = onBack)
 
     if (renaming) NameDialog("Renombrar lista", pl.name, "Guardar", { renaming = false }) { vm.renamePlaylist(pl.id, it); renaming = false }
@@ -567,6 +569,7 @@ private fun PlaylistDetail(vm: PlayerViewModel, pl: Playlist, onBack: () -> Unit
             }
             SmallAction(Icons.Default.Shuffle, "Aleatorio") { vm.playPlaylist(pl, shuffled = true) }
             SmallAction(Icons.Default.PlayArrow, "Reproducir todo") { vm.playPlaylist(pl) }
+            SmallAction(Icons.Default.Share, "Compartir lista") { sharePlaylist(context, vm, pl) }
             Box {
                 SmallAction(Icons.Default.MoreVert, "Opciones de la lista") { menu = true }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -591,6 +594,53 @@ private fun PlaylistDetail(vm: PlayerViewModel, pl: Playlist, onBack: () -> Unit
             }
         }
     }
+}
+
+/** Comparte una lista como enlace (el mismo formato que la web: se abre en la web o en el APK). */
+private fun sharePlaylist(context: Context, vm: PlayerViewModel, pl: Playlist) {
+    if (pl.tracks.isEmpty()) return
+    val n = pl.tracks.size
+    val text = "Lista «${pl.name}» · $n ${if (n == 1) "canción" else "canciones"}\n${vm.sharePlaylistLink(pl)}"
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, pl.name)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(send, "Compartir lista"))
+}
+
+/** Ventana al abrir un enlace de lista compartida: reproducir o guardar. */
+@Composable
+private fun SharedPlaylistDialog(vm: PlayerViewModel, pl: Playlist, onSaved: () -> Unit) {
+    val n = pl.tracks.size
+    AlertDialog(
+        onDismissRequest = { vm.dismissSharedPlaylist() },
+        containerColor = Panel,
+        title = { Text("Lista compartida") },
+        text = {
+            Column {
+                Text("«${pl.name}» · $n ${if (n == 1) "canción" else "canciones"}", color = Muted, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                pl.tracks.take(5).forEach { t ->
+                    Column(Modifier.padding(vertical = 5.dp)) {
+                        Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(t.artist, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (n > 5) Text("y ${n - 5} más…", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.saveSharedPlaylist(); onSaved() }) { Text("Guardar lista", color = Accent) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { vm.dismissSharedPlaylist() }) { Text("Cerrar", color = Muted) }
+                TextButton(onClick = { vm.playSharedPlaylist() }) { Text("Reproducir") }
+            }
+        },
+    )
 }
 
 /**

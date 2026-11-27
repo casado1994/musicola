@@ -47,8 +47,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShare(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { vm.openShared(it) }
+        when (intent?.action) {
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { vm.openShared(it) }
+            // Enlace de lista de Musicola (https://…/#list=…) tocado en WhatsApp, Mensajes…
+            Intent.ACTION_VIEW -> intent.dataString?.let { vm.openShared(it) }
         }
     }
 

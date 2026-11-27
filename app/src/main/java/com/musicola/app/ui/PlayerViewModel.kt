@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.musicola.app.data.Playlist
+import com.musicola.app.data.PlaylistLink
 import com.musicola.app.data.Track
 import com.musicola.app.data.YouTube
 import com.musicola.app.playback.AudioCache
@@ -139,6 +140,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun search(typing: Boolean = false) {
         val q = query.trim()
         if (q.isEmpty()) return
+        if (q.contains("#list=")) { // enlace de lista pegado en el buscador
+            if (!typing) { query = ""; openShared(q) }
+            return
+        }
         if (!typing) typingJob?.cancel()
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
@@ -357,7 +362,40 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Compartir desde YouTube ----
+    // ---- Listas compartidas (enlaces #list=…, compatibles con la web) ----
+    var sharedPlaylist by mutableStateOf<Playlist?>(null)
+        private set
+
+    fun sharePlaylistLink(pl: Playlist): String = PlaylistLink.encode(pl)
+
+    fun dismissSharedPlaylist() { sharedPlaylist = null }
+
+    fun saveSharedPlaylist(): Playlist? {
+        val shared = sharedPlaylist ?: return null
+        sharedPlaylist = null
+        val name = if (playlists.any { it.name == shared.name }) "${shared.name} (compartida)" else shared.name
+        val pl = shared.copy(id = Playlist.newId(), name = name)
+        savePlaylists(playlists + pl)
+        message = "Lista «$name» guardada"
+        return pl
+    }
+
+    fun playSharedPlaylist() {
+        val shared = sharedPlaylist ?: return
+        sharedPlaylist = null
+        playPlaylist(shared)
+    }
+
     fun openShared(text: String) {
+        if (text.contains("#list=")) {
+            val pl = PlaylistLink.decode(text)
+            when {
+                pl == null -> message = "El enlace de la lista no es válido"
+                pl.tracks.isEmpty() -> message = "La lista compartida está vacía"
+                else -> { sharedPlaylist = pl; pl.tracks.take(3).forEach { prefetchOne(it) } }
+            }
+            return
+        }
         if (controller == null) { pendingShare = text; return }
         val url = Regex("https?://\\S+").find(text)?.value ?: return
         viewModelScope.launch {
