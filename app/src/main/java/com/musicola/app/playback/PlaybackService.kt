@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.musicola.app.MainActivity
+import com.musicola.app.data.Playlist
 import com.musicola.app.data.Track
 import com.musicola.app.data.YouTube
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +51,8 @@ class PlaybackService : MediaLibraryService() {
         const val FAVS = "favs"
         const val RECENT = "recent"
         const val SEARCH_PREFIX = "search:"
+        const val LISTS = "lists"
+        const val PL_PREFIX = "pl:"
         const val MAX_RECENT = 50
     }
 
@@ -235,8 +238,11 @@ class PlaybackService : MediaLibraryService() {
         parent == FAVS -> favs()
         parent == RECENT -> recents()
         parent.startsWith(SEARCH_PREFIX) -> searchResults[parent.removePrefix(SEARCH_PREFIX)].orEmpty()
+        parent.startsWith(PL_PREFIX) -> playlists().find { it.id == parent.removePrefix(PL_PREFIX) }?.tracks.orEmpty()
         else -> emptyList()
     }
+
+    private fun playlists() = Playlist.listFromJson(prefs.getString("playlists", null))
 
     // Los elementos del catálogo usan IDs "carpeta|videoId" para saber de qué lista vienen
     private fun splitId(mediaId: String): Pair<String, String>? {
@@ -317,7 +323,8 @@ class PlaybackService : MediaLibraryService() {
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             val items = when (parentId) {
-                ROOT -> listOf(folder(FAVS, "Favoritos"), folder(RECENT, "Recientes"))
+                ROOT -> listOf(folder(FAVS, "Favoritos"), folder(LISTS, "Listas"), folder(RECENT, "Recientes"))
+                LISTS -> playlists().map { folder(PL_PREFIX + it.id, it.name) }
                 else -> listFor(parentId).map { browseItem(parentId, it) }
             }
             return Futures.immediateFuture(LibraryResult.ofItemList(paginate(items, page, pageSize), params))
@@ -332,7 +339,10 @@ class PlaybackService : MediaLibraryService() {
                 ROOT -> folder(ROOT, "Musicola")
                 FAVS -> folder(FAVS, "Favoritos")
                 RECENT -> folder(RECENT, "Recientes")
-                else -> splitId(mediaId)?.let { (parent, id) ->
+                LISTS -> folder(LISTS, "Listas")
+                else -> if (mediaId.startsWith(PL_PREFIX) && '|' !in mediaId)
+                    playlists().find { it.id == mediaId.removePrefix(PL_PREFIX) }?.let { folder(mediaId, it.name) }
+                else splitId(mediaId)?.let { (parent, id) ->
                     listFor(parent).firstOrNull { it.id == id }?.let { browseItem(parent, it) }
                 }
             }

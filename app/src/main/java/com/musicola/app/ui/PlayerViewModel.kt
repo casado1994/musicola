@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import com.musicola.app.data.Playlist
 import com.musicola.app.data.Track
 import com.musicola.app.data.YouTube
 import com.musicola.app.playback.AudioCache
@@ -291,6 +292,61 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("radio", true).apply()
         playList(listOf(track), 0) // el servicio rellena la cola con canciones parecidas
         message = "📻 Radio de «${track.title}»"
+    }
+
+    // ---- Listas de reproducción ----
+    var playlists by mutableStateOf(Playlist.listFromJson(prefs.getString("playlists", null)))
+        private set
+
+    private fun savePlaylists(list: List<Playlist>) {
+        playlists = list
+        // El servicio (Android Auto) lee estas listas de aquí
+        prefs.edit().putString("playlists", Playlist.listToJson(list)).apply()
+    }
+
+    private fun updatePlaylist(id: String, change: (Playlist) -> Playlist) {
+        savePlaylists(playlists.map { if (it.id == id) change(it) else it })
+    }
+
+    fun createPlaylist(name: String, first: Track? = null): Playlist {
+        val pl = Playlist(Playlist.newId(), name.trim().ifBlank { "Mi lista" }, listOfNotNull(first))
+        savePlaylists(playlists + pl)
+        message = if (first != null) "Añadida a «${pl.name}»" else "Lista «${pl.name}» creada"
+        return pl
+    }
+
+    fun addToPlaylist(id: String, t: Track) {
+        val pl = playlists.find { it.id == id } ?: return
+        if (pl.tracks.any { it.id == t.id }) { message = "Ya está en «${pl.name}»"; return }
+        updatePlaylist(id) { it.copy(tracks = it.tracks + t) }
+        message = "Añadida a «${pl.name}»"
+    }
+
+    fun removeFromPlaylist(id: String, index: Int) =
+        updatePlaylist(id) { pl -> pl.copy(tracks = pl.tracks.filterIndexed { i, _ -> i != index }) }
+
+    fun movePlaylistTrackUp(id: String, index: Int) {
+        if (index <= 0) return
+        updatePlaylist(id) { pl ->
+            val l = pl.tracks.toMutableList()
+            l.add(index - 1, l.removeAt(index))
+            pl.copy(tracks = l)
+        }
+    }
+
+    fun renamePlaylist(id: String, name: String) {
+        if (name.isNotBlank()) updatePlaylist(id) { it.copy(name = name.trim()) }
+    }
+
+    fun deletePlaylist(id: String) {
+        val pl = playlists.find { it.id == id } ?: return
+        savePlaylists(playlists.filterNot { it.id == id })
+        message = "Lista «${pl.name}» eliminada"
+    }
+
+    fun playPlaylist(pl: Playlist, start: Int = 0, shuffled: Boolean = false) {
+        if (pl.tracks.isEmpty()) { message = "La lista está vacía"; return }
+        if (shuffled) playList(pl.tracks.shuffled(), 0) else playList(pl.tracks, start)
     }
 
     // ---- Favoritos ----

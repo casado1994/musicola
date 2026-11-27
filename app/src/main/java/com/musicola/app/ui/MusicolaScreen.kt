@@ -2,6 +2,19 @@ package com.musicola.app.ui
 
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ScrollableTabRow
+import com.musicola.app.data.Playlist
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -104,6 +117,9 @@ fun MusicolaScreen(vm: PlayerViewModel) {
     MaterialTheme(colorScheme = Scheme) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
             var tab by rememberSaveable { mutableIntStateOf(0) }
+            // Canción para la que se ha pedido "Añadir a una lista…"
+            var addTarget by remember { mutableStateOf<Track?>(null) }
+            val onAddToList: (Track) -> Unit = { addTarget = it }
 
             // Barra de progreso: se refresca mientras suena
             LaunchedEffect(vm.isPlaying) {
@@ -119,8 +135,8 @@ fun MusicolaScreen(vm: PlayerViewModel) {
 
             Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
                 SearchBar(vm) { tab = 0 }
-                TabRow(selectedTabIndex = tab, containerColor = Bg, contentColor = Accent) {
-                    listOf("Resultados", "Cola (${vm.queue.size})", "Favoritos (${vm.favs.size})")
+                ScrollableTabRow(selectedTabIndex = tab, containerColor = Bg, contentColor = Accent, edgePadding = 4.dp) {
+                    listOf("Resultados", "Cola (${vm.queue.size})", "Favoritos (${vm.favs.size})", "Listas (${vm.playlists.size})")
                         .forEachIndexed { i, label ->
                             Tab(selected = tab == i, onClick = { tab = i; vm.prefetchTab(i) },
                                 text = { Text(label, fontSize = 13.sp, maxLines = 1) })
@@ -128,9 +144,10 @@ fun MusicolaScreen(vm: PlayerViewModel) {
                 }
                 Box(Modifier.weight(1f)) {
                     when (tab) {
-                        0 -> ResultsList(vm)
-                        1 -> QueueList(vm)
-                        else -> FavsList(vm)
+                        0 -> ResultsList(vm, onAddToList)
+                        1 -> QueueList(vm, onAddToList)
+                        2 -> FavsList(vm, onAddToList)
+                        else -> PlaylistsTab(vm, onAddToList)
                     }
                     vm.message?.let {
                         Text(
@@ -141,8 +158,9 @@ fun MusicolaScreen(vm: PlayerViewModel) {
                         )
                     }
                 }
-                if (vm.current != null) PlayerBar(vm)
+                if (vm.current != null) PlayerBar(vm, onAddToList)
             }
+            addTarget?.let { t -> AddToPlaylistDialog(vm, t) { addTarget = null } }
         }
     }
 }
@@ -181,7 +199,7 @@ private fun SearchBar(vm: PlayerViewModel, onSearch: () -> Unit) {
 }
 
 @Composable
-private fun ResultsList(vm: PlayerViewModel) {
+private fun ResultsList(vm: PlayerViewModel, onAddToList: (Track) -> Unit) {
     if (vm.loading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }
         return
@@ -193,17 +211,15 @@ private fun ResultsList(vm: PlayerViewModel) {
     LazyColumn(contentPadding = PaddingValues(8.dp)) {
         itemsIndexed(vm.results, key = { i, t -> "r$i${t.id}" }) { _, t ->
             TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playNow(t) }, onPress = { vm.prefetchOne(t) }) {
-                SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
-                SmallAction(Icons.Default.QueuePlayNext, "Reproducir después") { vm.playNext(t) }
-                SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
                 FavAction(vm, t)
+                TrackMenu(vm, t, onAddToList)
             }
         }
     }
 }
 
 @Composable
-private fun QueueList(vm: PlayerViewModel) {
+private fun QueueList(vm: PlayerViewModel, onAddToList: (Track) -> Unit) {
     if (vm.queue.isEmpty()) { Hint("La cola está vacía"); return }
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
@@ -214,6 +230,7 @@ private fun QueueList(vm: PlayerViewModel) {
                 TrackRow(t, playing = i == vm.currentIndex, onClick = { vm.playAt(i) }, onPress = { vm.prefetchOne(t) }) {
                     SmallAction(Icons.Default.KeyboardArrowUp, "Subir") { vm.moveUp(i) }
                     SmallAction(Icons.Default.Close, "Quitar") { vm.removeAt(i) }
+                    TrackMenu(vm, t, onAddToList, inQueue = true)
                 }
             }
         }
@@ -221,7 +238,7 @@ private fun QueueList(vm: PlayerViewModel) {
 }
 
 @Composable
-private fun FavsList(vm: PlayerViewModel) {
+private fun FavsList(vm: PlayerViewModel, onAddToList: (Track) -> Unit) {
     if (vm.favs.isEmpty()) { Hint("Aún no tienes favoritos. Pulsa ♡ en cualquier canción."); return }
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
@@ -231,9 +248,8 @@ private fun FavsList(vm: PlayerViewModel) {
         LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
             itemsIndexed(vm.favs, key = { _, t -> "f${t.id}" }) { i, t ->
                 TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playList(vm.favs, i) }, onPress = { vm.prefetchOne(t) }) {
-                    SmallAction(Icons.Default.Radio, "Iniciar radio") { vm.startRadio(t) }
-                    SmallAction(Icons.Default.Add, "Añadir a la cola") { vm.addToQueue(t) }
                     FavAction(vm, t)
+                    TrackMenu(vm, t, onAddToList)
                 }
             }
         }
@@ -303,7 +319,7 @@ private fun Hint(text: String) {
 }
 
 @Composable
-private fun PlayerBar(vm: PlayerViewModel) {
+private fun PlayerBar(vm: PlayerViewModel, onAddToList: (Track) -> Unit) {
     val t = vm.current ?: return
     val context = LocalContext.current
     var dragging by remember { mutableStateOf(false) }
@@ -322,6 +338,9 @@ private fun PlayerBar(vm: PlayerViewModel) {
             Column(Modifier.weight(1f)) {
                 Text(t.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(t.artist, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = { onAddToList(t) }) {
+                Icon(Icons.Default.PlaylistAdd, "Añadir a una lista", tint = Muted, modifier = Modifier.size(22.dp))
             }
             IconButton(onClick = { shareTrack(context, t) }) {
                 Icon(Icons.Default.Share, "Compartir canción", tint = Muted, modifier = Modifier.size(22.dp))
@@ -370,6 +389,205 @@ private fun PlayerBar(vm: PlayerViewModel) {
                     if (vm.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
                     "Repetir", tint = if (vm.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted,
                 )
+            }
+        }
+    }
+}
+
+/** Menú ⋮ de cada canción con todas las acciones (así las filas no se llenan de botones). */
+@Composable
+private fun TrackMenu(vm: PlayerViewModel, t: Track, onAddToList: (Track) -> Unit, inQueue: Boolean = false) {
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.MoreVert, "Más opciones", tint = Muted, modifier = Modifier.size(21.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val entries = buildList<Triple<String, ImageVector, () -> Unit>> {
+                add(Triple("Iniciar radio", Icons.Default.Radio) { vm.startRadio(t) })
+                if (!inQueue) {
+                    add(Triple("Reproducir después", Icons.Default.QueuePlayNext) { vm.playNext(t) })
+                    add(Triple("Añadir a la cola", Icons.Default.Add) { vm.addToQueue(t) })
+                }
+                add(Triple("Añadir a una lista…", Icons.Default.PlaylistAdd) { onAddToList(t) })
+                add(Triple("Compartir", Icons.Default.Share) { shareTrack(context, t) })
+            }
+            entries.forEach { (label, icon, action) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    leadingIcon = { Icon(icon, null, tint = Muted) },
+                    onClick = { open = false; action() },
+                )
+            }
+        }
+    }
+}
+
+/** Diálogo para escribir un nombre (nueva lista o renombrar). */
+@Composable
+private fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name, onValueChange = { name = it }, singleLine = true,
+                placeholder = { Text("Nombre de la lista") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) onConfirm(name) }),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text(confirm, color = Accent) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
+    )
+}
+
+/** "Añadir a una lista…": elegir una lista existente o crear una nueva con la canción. */
+@Composable
+private fun AddToPlaylistDialog(vm: PlayerViewModel, t: Track, onDismiss: () -> Unit) {
+    var creating by remember { mutableStateOf(vm.playlists.isEmpty()) }
+    if (creating) {
+        NameDialog("Nueva lista", "", "Crear y añadir", onDismiss) { vm.createPlaylist(it, t); onDismiss() }
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = { Text("Añadir a una lista") },
+        text = {
+            LazyColumn(Modifier.height(320.dp)) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { creating = true }.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Add, null, tint = Accent)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Nueva lista…", color = Accent)
+                    }
+                }
+                itemsIndexed(vm.playlists, key = { _, pl -> pl.id }) { _, pl ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .clickable { vm.addToPlaylist(pl.id, t); onDismiss() }.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.QueueMusic, null, tint = Muted)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(pl.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${pl.tracks.size} canciones", color = Muted, fontSize = 12.sp)
+                        }
+                        if (pl.tracks.any { it.id == t.id }) Icon(Icons.Default.Check, "Ya está", tint = Accent)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar", color = Muted) } },
+    )
+}
+
+/** Pestaña "Listas": índice de listas o detalle de una lista. */
+@Composable
+private fun PlaylistsTab(vm: PlayerViewModel, onAddToList: (Track) -> Unit) {
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    val pl = vm.playlists.find { it.id == openId }
+
+    if (creating) {
+        NameDialog("Nueva lista", "", "Crear", { creating = false }) { name ->
+            openId = vm.createPlaylist(name).id; creating = false
+        }
+    }
+    if (pl != null) {
+        PlaylistDetail(vm, pl, onBack = { openId = null }, onAddToList)
+        return
+    }
+    Column {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { creating = true }) {
+                Icon(Icons.Default.Add, null, tint = Accent); Spacer(Modifier.width(4.dp)); Text("Nueva lista", color = Accent)
+            }
+        }
+        if (vm.playlists.isEmpty()) {
+            Hint("Aún no tienes listas. Crea una aquí o usa ⋮ → «Añadir a una lista…» en cualquier canción.")
+            return
+        }
+        LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
+            itemsIndexed(vm.playlists, key = { _, p -> p.id }) { _, p ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { openId = p.id }.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).background(Panel), contentAlignment = Alignment.Center) {
+                        val cover = p.tracks.firstOrNull()?.thumb
+                        if (cover != null) AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else Icon(Icons.Default.QueueMusic, null, tint = Muted)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${p.tracks.size} canciones", color = Muted, fontSize = 13.sp)
+                    }
+                    SmallAction(Icons.Default.PlayArrow, "Reproducir") { vm.playPlaylist(p) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistDetail(vm: PlayerViewModel, pl: Playlist, onBack: () -> Unit, onAddToList: (Track) -> Unit) {
+    var renaming by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    BackHandler(onBack = onBack)
+
+    if (renaming) NameDialog("Renombrar lista", pl.name, "Guardar", { renaming = false }) { vm.renamePlaylist(pl.id, it); renaming = false }
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        containerColor = Panel,
+        title = { Text("¿Eliminar «${pl.name}»?") },
+        text = { Text("Se borra la lista, no las canciones de tus favoritos.", color = Muted) },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deletePlaylist(pl.id); onBack() }) { Text("Eliminar", color = Accent) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar", color = Muted) } },
+    )
+
+    Column {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Volver") }
+            Column(Modifier.weight(1f)) {
+                Text(pl.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${pl.tracks.size} canciones", color = Muted, fontSize = 12.sp)
+            }
+            SmallAction(Icons.Default.Shuffle, "Aleatorio") { vm.playPlaylist(pl, shuffled = true) }
+            SmallAction(Icons.Default.PlayArrow, "Reproducir todo") { vm.playPlaylist(pl) }
+            Box {
+                SmallAction(Icons.Default.MoreVert, "Opciones de la lista") { menu = true }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Renombrar") }, leadingIcon = { Icon(Icons.Default.Edit, null, tint = Muted) },
+                        onClick = { menu = false; renaming = true })
+                    DropdownMenuItem(text = { Text("Eliminar lista") }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = Muted) },
+                        onClick = { menu = false; confirmDelete = true })
+                }
+            }
+        }
+        if (pl.tracks.isEmpty()) {
+            Hint("Lista vacía. Añade canciones con ⋮ → «Añadir a una lista…».")
+            return
+        }
+        LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
+            itemsIndexed(pl.tracks, key = { i, t -> "pl$i${t.id}" }) { i, t ->
+                TrackRow(t, playing = vm.current?.id == t.id, onClick = { vm.playPlaylist(pl, i) }, onPress = { vm.prefetchOne(t) }) {
+                    SmallAction(Icons.Default.KeyboardArrowUp, "Subir") { vm.movePlaylistTrackUp(pl.id, i) }
+                    SmallAction(Icons.Default.Close, "Quitar de la lista") { vm.removeFromPlaylist(pl.id, i) }
+                    TrackMenu(vm, t, onAddToList)
+                }
             }
         }
     }
