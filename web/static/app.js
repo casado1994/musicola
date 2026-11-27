@@ -3,6 +3,7 @@ const $ = (s) => document.querySelector(s);
 const audio = $("#audio");
 
 // Token opcional: abre la app una vez como /?t=TU_TOKEN y se recuerda.
+const SHARED_ID = new URLSearchParams(location.search).get("v"); // enlace compartido (?v=ID)
 const urlToken = new URLSearchParams(location.search).get("t");
 if (urlToken) { localStorage.setItem("token", urlToken); history.replaceState(null, "", "/"); }
 const TOKEN = localStorage.getItem("token") || "";
@@ -41,13 +42,14 @@ const state = {
   shuffle: load("shuffle", false),
   repeat: load("repeat", "off"), // off | all | one
   radio: load("radio", false),
+  mode: load("mode", "songs"), // "songs" (YouTube Music) o "videos" (YouTube)
   played: load("played", []), // ids escuchados recientemente (para que la radio no repita)
   results: [],
 };
 const persist = () => {
   save("queue", state.queue); save("index", state.index); save("favs", state.favs);
   save("shuffle", state.shuffle); save("repeat", state.repeat);
-  save("radio", state.radio); save("played", state.played.slice(-300));
+  save("radio", state.radio); save("mode", state.mode); save("played", state.played.slice(-300));
 };
 
 // ---------- Utilidades ----------
@@ -416,16 +418,74 @@ document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
 });
 
 // Búsqueda
+// ---------- Canciones / Vídeos ----------
+function renderModes() {
+  document.querySelectorAll(".modes .chip").forEach((c) => {
+    const on = c.dataset.mode === state.mode;
+    c.classList.toggle("on", on);
+    c.setAttribute("aria-checked", on);
+  });
+}
+document.querySelectorAll(".modes .chip").forEach((c) => c.onclick = () => {
+  if (state.mode === c.dataset.mode) return;
+  state.mode = c.dataset.mode; persist(); renderModes();
+  if ($("#q").value.trim()) runSearch($("#q").value);
+});
+renderModes();
+
+// ---------- Compartir ----------
+function youtubeId(text) {
+  const m = text.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+async function shareTrack(t) {
+  if (!t) return;
+  const url = `${location.origin}/?v=${t.id}`;
+  const text = `${t.title}${t.channel ? " – " + t.channel : ""}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: t.title, text, url }); // menú de compartir del sistema (iPhone, Android…)
+    } else {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      setStatus("Enlace copiado: pégalo donde quieras");
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") prompt("Copia este enlace:", url);
+  }
+}
+$("#btn-share").onclick = () => shareTrack(current());
+
+// Abre una canción compartida (enlace de Musicola con ?v=, o enlace de YouTube pegado)
+async function openShared(id, autoplay) {
+  setStatus("Cargando canción…");
+  try {
+    const r = await fetch(withToken(`/api/track/${id}`));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+    const t = await r.json();
+    let idx = state.queue.findIndex((x) => x.id === t.id);
+    if (idx < 0) { idx = Math.max(0, state.index + 1); state.queue.splice(idx, 0, t); }
+    if (autoplay) { playIndex(idx); setStatus(""); }
+    else {
+      // Sin un toque previo el navegador no deja reproducir: se deja preparada
+      playIndex(idx, false); prefetch(t.id, true); renderAll();
+      setStatus(`Pulsa ▶ para escuchar «${t.title}»`);
+    }
+  } catch (e) { setStatus("No se pudo abrir la canción: " + e.message); }
+}
+
 // Búsqueda: al pulsar Enter y también mientras escribes (como Spotify)
 let searchSeq = 0;
 async function runSearch(q, { typing = false } = {}) {
   q = q.trim(); if (!q) return;
+  // ¿Han pegado un enlace de YouTube? Se abre esa canción directamente
+  const linkId = youtubeId(q);
+  if (linkId) { if (!typing) { $("#q").value = ""; openShared(linkId, true); } return; }
   const seq = ++searchSeq; // si llega una búsqueda más nueva, esta se descarta
   if (!typing) { $("#q").blur(); state.results = []; renderAll(); }
   if (currentTab !== "results") document.querySelector('.tabs button[data-tab="results"]').click();
   if (!state.results.length) setStatus("Buscando…");
   try {
-    const r = await fetch(withToken(`/api/search?q=${encodeURIComponent(q)}`));
+    const r = await fetch(withToken(`/api/search?q=${encodeURIComponent(q)}&mode=${state.mode}`));
     if (seq !== searchSeq) return;
     if (r.status === 401) {
       // Servidor protegido: pide la contraseña una vez y la recuerda en este navegador
@@ -511,6 +571,13 @@ document.addEventListener("visibilitychange", () => {
 
 // Arranque: restaura la última canción (sin reproducir automáticamente)
 if (current()) { playIndex(state.index, false); warmCurrent(); }
+{
+  const sharedId = SHARED_ID;
+  if (sharedId && /^[\w-]{11}$/.test(sharedId)) {
+    history.replaceState(null, "", "/");
+    openShared(sharedId, false);
+  }
+}
 renderAll();
 setStatus(state.queue.length ? "" : "Busca algo para empezar");
 

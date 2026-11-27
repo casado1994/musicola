@@ -92,3 +92,10 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 #btn-mute { color: var(--muted); }
 #btn-mute:hover { color: var(--text); }
 @media (max-width: 420px) { #volume { width: 64px; } }
+
+/* Canciones / Vídeos */
+.modes { display: flex; gap: 8px; padding: 0 16px 10px; }
+.chip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+.chip.on { background: #2a1820; border-color: var(--accent); color: var(--text); }
+#btn-share { color: var(--muted); }
+#btn-share:hover { color: var(--text); }

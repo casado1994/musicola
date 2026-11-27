@@ -374,10 +374,12 @@ def _dedupe(items):
     return out
 
 
-async def _direct_search(q: str) -> list[dict]:
+async def _direct_search(q: str, songs: bool = True) -> list[dict]:
     out = []
-    # 1) Filtro "Canciones" de YouTube Music
+    # 1) Filtro "Canciones" de YouTube Music (solo en modo Canciones)
     try:
+        if not songs:
+            raise LookupError("modo vídeos")
         j = await _innertube("music.youtube.com", "search", MUSIC_CLIENT,
                              {"query": q, "params": "EgWKAQIIAWoMEA4QChADEAQQCRAF"})
 
@@ -404,9 +406,11 @@ async def _direct_search(q: str) -> list[dict]:
             out.append(_track(vid, title, artist, _secs(dur)))
 
         _walk(j, song)
+    except LookupError:
+        pass
     except Exception as e:
         print(f"[musicola] búsqueda de canciones falló: {e}", flush=True)
-    # 2) Reserva: vídeos de YouTube normal
+    # 2) Vídeos de YouTube normal (modo Vídeos, o reserva si no hubo canciones)
     if not out:
         j = await _innertube("www.youtube.com", "search", WEB_CLIENT, {"query": q, "params": "EgIQAQ=="})
 
@@ -599,15 +603,16 @@ async def token_guard(request: Request, call_next):
 
 
 @app.get("/api/search")
-async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Query(20, ge=1, le=40)):
-    key = f"{n}:{q.strip().lower()}"
+async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Query(20, ge=1, le=40),
+                 mode: str = Query("songs", pattern="^(songs|videos)$")):
+    key = f"{mode}:{n}:{q.strip().lower()}"
     hit = _search_cache.get(key)
     if hit and hit[0] > time.time():
         return hit[1]
     results = []
     if FAST_DIRECT and _direct_http is not None:
         try:
-            results = (await _direct_search(q))[:n]  # como la extensión: directo a YouTube Music
+            results = (await _direct_search(q, songs=mode == "songs"))[:n]  # directo a YouTube (Music)
         except Exception as e:
             print(f"[musicola] búsqueda directa falló, uso yt-dlp: {e}", flush=True)
     if not results:
@@ -618,6 +623,30 @@ async def search(q: str = Query(..., min_length=1, max_length=200), n: int = Que
     _search_cache[key] = (time.time() + 600, results)
     _trim(_search_cache, 100)
     return results
+
+
+@app.get("/api/track/{vid}")
+async def track_info(vid: str):
+    """Título, artista y duración de un vídeo (para enlaces compartidos)."""
+    if not ID_RE.match(vid):
+        raise HTTPException(400, "ID no válido")
+    try:
+        j = await _innertube("www.youtube.com", "player", WEB_CLIENT, {"videoId": vid})
+        d = j.get("videoDetails") or {}
+        if d.get("title"):
+            dur = int(d["lengthSeconds"]) if str(d.get("lengthSeconds", "")).isdigit() else None
+            return _track(vid, d["title"], d.get("author", ""), dur)
+    except Exception as e:
+        print(f"[musicola] datos de {vid} (directo) fallaron: {e}", flush=True)
+
+    def via_ytdlp():
+        with yt_dlp.YoutubeDL(_ydl_opts(skip_download=True)) as ydl:
+            return ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False, process=False)
+    try:
+        info = await asyncio.to_thread(via_ytdlp)
+        return _track(vid, info.get("title"), info.get("channel") or info.get("uploader"), info.get("duration"))
+    except Exception as e:
+        raise HTTPException(502, f"No se pudo obtener la canción: {e}") from e
 
 
 _radio_cache: dict[str, tuple[float, list]] = {}
