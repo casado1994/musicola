@@ -210,8 +210,18 @@ if ("mediaSession" in navigator) {
   ms.setActionHandler("previoustrack", prev);
   ms.setActionHandler("nexttrack", () => next());
   try { ms.setActionHandler("seekto", (d) => { audio.currentTime = d.seekTime; }); } catch {}
-  try { ms.setActionHandler("seekbackward", (d) => { audio.currentTime -= d.seekOffset || 10; }); } catch {}
-  try { ms.setActionHandler("seekforward", (d) => { audio.currentTime += d.seekOffset || 10; }); } catch {}
+  try { ms.setActionHandler("stop", () => audio.pause()); } catch {}
+  // En iPhone (pantalla de bloqueo y CarPlay) y en Android, si existen los botones de ±10 s
+  // sustituyen a «anterior / siguiente canción». En móvil solo se dejan los de cambiar canción;
+  // en escritorio se mantienen (las teclas multimedia del teclado usan los dos).
+  const mobile = IS_APPLE_WEBKIT || matchMedia("(hover: none) and (pointer: coarse)").matches;
+  try { ms.setActionHandler("seekbackward", mobile ? null : (d) => { audio.currentTime -= d.seekOffset || 10; }); } catch {}
+  try { ms.setActionHandler("seekforward", mobile ? null : (d) => { audio.currentTime += d.seekOffset || 10; }); } catch {}
+}
+// Estado de reproducción para CarPlay / pantalla de bloqueo (botón play/pausa correcto)
+if ("mediaSession" in navigator) {
+  audio.addEventListener("play", () => { navigator.mediaSession.playbackState = "playing"; });
+  audio.addEventListener("pause", () => { navigator.mediaSession.playbackState = "paused"; });
 }
 
 // ---------- Eventos del audio ----------
