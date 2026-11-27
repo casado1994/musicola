@@ -533,6 +533,8 @@ let searchSeq = 0;
 async function runSearch(q, { typing = false } = {}) {
   q = q.trim(); if (!q) return;
   // ¿Han pegado un enlace de YouTube? Se abre esa canción directamente
+  // ¿Un enlace de lista de Musicola? Se abre la lista
+  if (/#list=[zj][\w-]+/.test(q)) { if (!typing) { $("#q").value = ""; $("#q").blur(); openSharedPlaylistCode(q); } return; }
   const linkId = youtubeId(q);
   if (linkId) { if (!typing) { $("#q").value = ""; openShared(linkId, true); } return; }
   const seq = ++searchSeq; // si llega una búsqueda más nueva, esta se descarta
@@ -838,10 +840,21 @@ async function sharePlaylist(pl) {
   return shareLink({ title: pl.name, text, url, label: "Compartir lista" });
 }
 
+// iPhone/iPad: Safari y la app de la pantalla de inicio guardan los datos por separado,
+// y iOS siempre abre los enlaces en Safari. Ahí se ofrece copiar el enlace para pegarlo en la app.
+const IS_STANDALONE = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+const IOS_BROWSER = /iPhone|iPad|iPod/.test(navigator.userAgent) && !IS_STANDALONE;
+
 async function openSharedPlaylistFromHash() {
   const m = location.hash.match(/^#list=([zj][\w-]+)$/);
   if (!m) return;
   history.replaceState(null, "", location.pathname + location.search);
+  return openSharedPlaylistCode(m[0]);
+}
+
+async function openSharedPlaylistCode(text) {
+  const m = String(text).match(/#list=([zj][\w-]+)/);
+  if (!m) return toast("Ese enlace no es de una lista de Musicola");
   let shared;
   try { shared = await decodePlaylist(m[1]); } catch { return toast("El enlace de la lista no es válido"); }
   if (!shared.tracks.length) return toast("La lista compartida está vacía");
@@ -850,13 +863,25 @@ async function openSharedPlaylistFromHash() {
     <h2>Lista compartida</h2>
     <div class="sheet-sub">«${esc(shared.name)}» · ${nCanciones(shared.tracks.length)}</div>
     <ul class="shared-preview">${preview}${shared.tracks.length > 5 ? `<li class="sub">y ${shared.tracks.length - 5} más…</li>` : ""}</ul>
+    ${IOS_BROWSER ? `<div class="ios-hint">
+      <b>¿Usas Musicola desde la pantalla de inicio?</b> El iPhone abre los enlaces en Safari, que no comparte las listas con la app.
+      Copia el enlace, abre Musicola y en <b>Listas</b> pulsa <b>Pegar lista</b>.
+      <button class="text-btn accent" data-copylink>Copiar enlace para la app</button>
+    </div>` : ""}
     <div class="sheet-actions">
       <button class="text-btn" data-close>Cerrar</button>
       <button class="text-btn" data-sh="play">Reproducir</button>
       <button class="text-btn accent" data-sh="save">Guardar lista</button>
     </div>`);
   prefetchMany(shared.tracks.slice(0, 3).map((t) => t.id));
-  $("#sheet-body").onclick = (e) => {
+  const link = `${location.origin}/#list=${m[1]}`;
+  $("#sheet-body").onclick = async (e) => {
+    const c = e.target.closest("[data-copylink]");
+    if (c) {
+      try { await navigator.clipboard.writeText(link); c.textContent = "¡Copiado! Ahora abre Musicola"; }
+      catch { prompt("Copia este enlace:", link); }
+      return;
+    }
     const b = e.target.closest("[data-sh]"); if (!b) return;
     closeSheet();
     if (b.dataset.sh === "play") return playPlaylist(shared);
@@ -869,3 +894,14 @@ async function openSharedPlaylistFromHash() {
   };
 }
 addEventListener("hashchange", openSharedPlaylistFromHash);
+
+// «Pegar lista»: lee el enlace del portapapeles (iOS muestra el botón «Pegar» para permitirlo)
+async function pastePlaylist() {
+  let text = "";
+  try { text = await navigator.clipboard.readText(); } catch {}
+  if (/#list=[zj][\w-]+/.test(text)) return openSharedPlaylistCode(text);
+  askName("Pegar lista", "", "Abrir", (v) => openSharedPlaylistCode(v));
+  const input = $("#name-input");
+  if (input) { input.removeAttribute("maxlength"); input.placeholder = "Pega aquí el enlace de la lista"; input.value = ""; }
+}
+$("#pl-paste").onclick = pastePlaylist;

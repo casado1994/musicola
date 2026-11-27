@@ -161,3 +161,7 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 .share-url { width: 100%; margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); font-size: 14px; outline: none; }
 .share-url:focus { border-color: var(--accent); }
+
+.ios-hint { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; line-height: 1.45; }
+.ios-hint b { color: var(--text); font-weight: 600; }
+.ios-hint .text-btn { display: block; margin: 8px 0 0 -10px; }
