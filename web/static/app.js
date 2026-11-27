@@ -22,6 +22,14 @@ const ICON = {
   fav: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
   favOff: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z",
   add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+  more: "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
+  listAdd: "M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z",
+  list: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z",
+  back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z",
+  edit: "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z",
+  trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+  check: "M9 16.17L4.83 12l-1.42 1.42L9 19 21 7l-1.41-1.41z",
+  share: "M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z",
   playNext: "M21 3H3c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h5v2h8v-2h2v-2H3V5h18v8h2V5c0-1.11-.9-2-2-2zm-8 7V7h-2v3H8v2h3v3h2v-3h3v-2h-3zm11 8l-4.5 4.5L18 21l3-3-3-3 1.5-1.5L24 18z",
   close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
   up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z",
@@ -39,6 +47,7 @@ const state = {
   queue: load("queue", []),
   index: load("index", -1),
   favs: load("favs", []),
+  playlists: load("playlists", []), // [{id, name, tracks:[…]}]
   shuffle: load("shuffle", false),
   repeat: load("repeat", "off"), // off | all | one
   radio: load("radio", false),
@@ -47,7 +56,7 @@ const state = {
   results: [],
 };
 const persist = () => {
-  save("queue", state.queue); save("index", state.index); save("favs", state.favs);
+  save("queue", state.queue); save("index", state.index); save("favs", state.favs); save("playlists", state.playlists);
   save("shuffle", state.shuffle); save("repeat", state.repeat);
   save("radio", state.radio); save("mode", state.mode); save("played", state.played.slice(-300));
 };
@@ -75,10 +84,10 @@ function renderList(el, tracks, mode) {
         <div class="sub">${esc(t.channel)}${t.duration ? " · " + fmt(t.duration) : ""}${t.fromRadio ? `<span class="radio-tag">${icon("radio")} radio</span>` : ""}</div>
       </div>
       <div class="actions">
-        ${mode === "queue"
-          ? `<button data-act="up" title="Subir">${icon("up")}</button><button data-act="remove" title="Quitar">${icon("close")}</button>`
-          : `<button data-act="radio" title="Iniciar radio con esta canción">${icon("radio")}</button><button data-act="next" title="Reproducir después">${icon("playNext")}</button><button data-act="add" title="Añadir a la cola">${icon("add")}</button>`}
-        <button data-act="fav" class="${isFav(t.id) ? "on" : ""}" title="Favorito">${icon(isFav(t.id) ? "fav" : "favOff")}</button>
+        ${mode === "queue" || mode === "pl"
+          ? `<button data-act="up" title="Subir">${icon("up")}</button><button data-act="remove" title="${mode === "pl" ? "Quitar de la lista" : "Quitar"}">${icon("close")}</button>`
+          : `<button data-act="fav" class="${isFav(t.id) ? "on" : ""}" title="Favorito">${icon(isFav(t.id) ? "fav" : "favOff")}</button>`}
+        <button data-act="more" title="Más opciones">${icon("more")}</button>
       </div>
     </li>`).join("");
 }
@@ -86,6 +95,8 @@ function renderAll() {
   renderList($("#results"), state.results, "results");
   renderList($("#queue"), state.queue, "queue");
   renderList($("#favs"), state.favs, "favs");
+  renderPlaylists();
+  $("#lists-count").textContent = state.playlists.length ? `(${state.playlists.length})` : "";
   $("#queue-count").textContent = state.queue.length ? `(${state.queue.length})` : "";
   updateQueueBar();
   const t = current();
@@ -340,17 +351,27 @@ function toggleFav(t) {
 }
 
 // Clicks en listas (delegación)
-for (const [id, mode] of [["#results", "results"], ["#queue", "queue"], ["#favs", "favs"]]) {
+const listFor = (mode) => mode === "results" ? state.results : mode === "queue" ? state.queue
+  : mode === "favs" ? state.favs : (openPlaylist()?.tracks || []);
+for (const [id, mode] of [["#results", "results"], ["#queue", "queue"], ["#favs", "favs"], ["#pl-tracks", "pl"]]) {
   $(id).addEventListener("click", (e) => {
     const btn = e.target.closest("[data-act]"); const li = e.target.closest(".item");
     if (!btn || !li) return;
     const i = +li.dataset.i;
-    const list = mode === "results" ? state.results : mode === "queue" ? state.queue : state.favs;
+    const list = listFor(mode);
     const t = list[i];
+    if (mode === "pl" && btn.dataset.act !== "play" && btn.dataset.act !== "more") {
+      const pl = openPlaylist();
+      if (btn.dataset.act === "remove") pl.tracks.splice(i, 1);
+      if (btn.dataset.act === "up" && i > 0) [pl.tracks[i - 1], pl.tracks[i]] = [pl.tracks[i], pl.tracks[i - 1]];
+      persist(); renderAll(); return;
+    }
     switch (btn.dataset.act) {
+      case "more": openTrackMenu(btn, t, mode); return;
       case "play":
         if (mode === "queue") playIndex(i);
         else if (mode === "favs") { state.queue = [...state.favs]; playIndex(i); } // reproduce la lista de favoritos
+        else if (mode === "pl") { playPlaylist(openPlaylist(), i); return; }
         else playNow(t);
         break;
       case "radio": startRadio(t); return;
@@ -395,12 +416,12 @@ function clearQueue() {
 $("#btn-clear-queue").onclick = clearQueue;
 
 // Al tocar una canción se empieza a preparar ya (antes de levantar el dedo)
-for (const id of ["#results", "#queue", "#favs"]) {
+for (const [id, mode] of [["#results", "results"], ["#queue", "queue"], ["#favs", "favs"], ["#pl-tracks", "pl"]]) {
   $(id).addEventListener("pointerdown", (e) => {
     if (e.target.closest(".actions")) return;
     const li = e.target.closest(".item");
     if (!li) return;
-    const list = id === "#results" ? state.results : id === "#queue" ? state.queue : state.favs;
+    const list = listFor(mode);
     const t = list[+li.dataset.i];
     if (t) prefetch(t.id, true);
   }, { passive: true });
@@ -409,11 +430,12 @@ for (const id of ["#results", "#queue", "#favs"]) {
 // Pestañas
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["results", "queue", "favs"]) $("#" + id).classList.toggle("hidden", id !== b.dataset.tab);
+  for (const id of ["results", "queue", "favs", "lists"]) $("#" + id).classList.toggle("hidden", id !== b.dataset.tab);
   currentTab = b.dataset.tab; updateQueueBar();
   // Al mirar la cola o los favoritos, se preparan sus canciones
   if (b.dataset.tab === "queue") prefetchMany(state.queue.slice(Math.max(0, state.index), state.index + 6).map((t) => t.id));
   if (b.dataset.tab === "favs") prefetchMany(state.favs.slice(0, 6).map((t) => t.id));
+  if (b.dataset.tab === "lists") { const pl = openPlaylist(); if (pl) prefetchMany(pl.tracks.slice(0, 6).map((t) => t.id)); }
   setStatus(b.dataset.tab === "favs" && !state.favs.length ? "Aún no tienes favoritos." : "");
 });
 
@@ -454,6 +476,7 @@ async function shareTrack(t) {
   }
 }
 $("#btn-share").onclick = () => shareTrack(current());
+$("#btn-addlist").onclick = () => { const t = current(); if (t) openAddToList(t); };
 
 // Abre una canción compartida (enlace de Musicola con ?v=, o enlace de YouTube pegado)
 async function openShared(id, autoplay) {
@@ -585,3 +608,164 @@ renderAll();
 setStatus(state.queue.length ? "" : "Busca algo para empezar");
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+// ---------- Listas de reproducción ----------
+// Se guardan en este navegador (localStorage), como los favoritos.
+var openListId = null; // lista abierta en la pestaña «Listas» (null = índice)
+function openPlaylist() { return state.playlists.find((p) => p.id === openListId) || null; }
+function plById(id) { return state.playlists.find((p) => p.id === id); }
+function nCanciones(n) { return `${n} ${n === 1 ? "canción" : "canciones"}`; }
+
+function toast(text) {
+  const el = $("#toast");
+  el.textContent = text; el.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function createPlaylist(name, first) {
+  const pl = { id: "p" + Date.now().toString(36), name: name.trim(), tracks: first ? [first] : [] };
+  state.playlists.unshift(pl);
+  persist(); renderAll();
+  toast(first ? `Añadida a «${pl.name}»` : `Lista «${pl.name}» creada`);
+  return pl;
+}
+function addToPlaylist(id, t) {
+  const pl = plById(id); if (!pl) return;
+  if (pl.tracks.some((x) => x.id === t.id)) return toast(`Ya está en «${pl.name}»`);
+  const { fromRadio, ...clean } = t;
+  pl.tracks.push(clean);
+  persist(); renderAll(); toast(`Añadida a «${pl.name}»`);
+}
+function playPlaylist(pl, start = 0, shuffled = false) {
+  if (!pl || !pl.tracks.length) return;
+  let list = [...pl.tracks];
+  if (shuffled) { for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; } start = 0; }
+  state.queue = list; playIndex(start);
+}
+
+function renderPlaylists() {
+  const pl = openPlaylist();
+  $("#pl-index").classList.toggle("hidden", !!pl);
+  $("#pl-detail").classList.toggle("hidden", !pl);
+  if (pl) {
+    $("#pl-name").textContent = pl.name;
+    $("#pl-count").textContent = nCanciones(pl.tracks.length);
+    renderList($("#pl-tracks"), pl.tracks, "pl");
+    $("#pl-empty").classList.toggle("hidden", pl.tracks.length > 0);
+    return;
+  }
+  $("#pl-list").innerHTML = state.playlists.map((p) => `
+    <li class="item pl-item" data-id="${esc(p.id)}">
+      <div class="pl-cover" data-act="open">${p.tracks[0] ? `<img src="${esc(p.tracks[0].thumb)}" alt="" loading="lazy">` : icon("list")}</div>
+      <div class="meta" data-act="open"><div class="title">${esc(p.name)}</div><div class="sub">${nCanciones(p.tracks.length)}</div></div>
+      <div class="actions"><button data-act="playlist" title="Reproducir">${icon("play")}</button></div>
+    </li>`).join("");
+  $("#pl-none").classList.toggle("hidden", state.playlists.length > 0);
+}
+
+$("#pl-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-act]"); const li = e.target.closest(".pl-item");
+  if (!btn || !li) return;
+  const pl = plById(li.dataset.id);
+  if (btn.dataset.act === "playlist") return playPlaylist(pl);
+  openListId = pl.id; renderAll();
+  prefetchMany(pl.tracks.slice(0, 6).map((t) => t.id));
+  $("main").scrollTop = 0;
+});
+$("#pl-back").onclick = () => { openListId = null; renderAll(); };
+$("#pl-play").onclick = () => playPlaylist(openPlaylist());
+$("#pl-shuffle").onclick = () => playPlaylist(openPlaylist(), 0, true);
+$("#pl-new").onclick = () => askName("Nueva lista", "", "Crear", (name) => { openListId = createPlaylist(name).id; renderAll(); });
+$("#pl-rename").onclick = () => {
+  const pl = openPlaylist();
+  askName("Renombrar lista", pl.name, "Guardar", (name) => { pl.name = name.trim(); persist(); renderAll(); });
+};
+$("#pl-delete").onclick = () => {
+  const pl = openPlaylist();
+  if (!confirm(`¿Eliminar la lista «${pl.name}»?`)) return;
+  state.playlists = state.playlists.filter((p) => p.id !== pl.id);
+  openListId = null; persist(); renderAll(); toast("Lista eliminada");
+};
+
+// ---------- Menú ⋮ de cada canción ----------
+function closeMenu() { $("#menu").classList.add("hidden"); }
+function openTrackMenu(anchor, t, mode) {
+  const m = $("#menu");
+  const items = [["radio", "Iniciar radio", "radio"]];
+  if (mode !== "queue") items.push(["next", "Reproducir después", "playNext"], ["add", "Añadir a la cola", "add"]);
+  if (mode === "queue" || mode === "pl") items.push(["fav", isFav(t.id) ? "Quitar de favoritos" : "Añadir a favoritos", isFav(t.id) ? "fav" : "favOff"]);
+  items.push(["list", "Añadir a una lista…", "listAdd"], ["share", "Compartir", "share"]);
+  m.innerHTML = items.map(([a, label, ic]) => `<button data-m="${a}">${icon(ic)}<span>${label}</span></button>`).join("");
+  m.onclick = (e) => {
+    const b = e.target.closest("[data-m]"); if (!b) return;
+    closeMenu();
+    switch (b.dataset.m) {
+      case "radio": return startRadio(t);
+      case "next": state.queue.splice(state.index + 1, 0, t); toast("Sonará después"); break;
+      case "add": state.queue.push(t); toast("Añadida a la cola"); break;
+      case "fav": return toggleFav(t);
+      case "list": return openAddToList(t);
+      case "share": return shareTrack(t);
+    }
+    persist(); renderAll();
+  };
+  m.classList.remove("hidden");
+  const r = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + "px";
+  m.style.top = (r.bottom + h + 8 < innerHeight ? r.bottom + 4 : Math.max(8, r.top - h - 4)) + "px";
+}
+document.addEventListener("pointerdown", (e) => {
+  if (!$("#menu").classList.contains("hidden") && !e.target.closest("#menu") && !e.target.closest('[data-act="more"]')) closeMenu();
+});
+$("main").addEventListener("scroll", closeMenu, { passive: true });
+addEventListener("resize", closeMenu);
+
+// ---------- Ventanas: elegir lista / escribir nombre ----------
+function openSheet(html) {
+  $("#sheet-body").innerHTML = html;
+  $("#sheet").classList.remove("hidden");
+}
+function closeSheet() { $("#sheet").classList.add("hidden"); $("#sheet-body").innerHTML = ""; }
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet" || e.target.closest("[data-close]")) closeSheet(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSheet(); closeMenu(); } });
+
+function askName(title, initial, confirmLabel, onOk) {
+  openSheet(`
+    <h2>${esc(title)}</h2>
+    <form id="name-form" autocomplete="off">
+      <input id="name-input" type="text" maxlength="80" placeholder="Nombre de la lista" value="${esc(initial)}" enterkeyhint="done">
+      <div class="sheet-actions">
+        <button type="button" class="text-btn" data-close>Cancelar</button>
+        <button type="submit" class="text-btn accent">${esc(confirmLabel)}</button>
+      </div>
+    </form>`);
+  const input = $("#name-input");
+  setTimeout(() => { input.focus(); input.select(); }, 30);
+  $("#name-form").onsubmit = (e) => {
+    e.preventDefault();
+    const v = input.value.trim(); if (!v) return input.focus();
+    closeSheet(); onOk(v);
+  };
+}
+
+function openAddToList(t) {
+  if (!state.playlists.length) return askName("Nueva lista", "", "Crear y añadir", (name) => createPlaylist(name, t));
+  openSheet(`
+    <h2>Añadir a una lista</h2>
+    <div class="sheet-sub">${esc(t.title)}</div>
+    <ul class="sheet-list">
+      <li><button data-new>${icon("add")}<span class="accent">Nueva lista…</span></button></li>
+      ${state.playlists.map((p) => `
+        <li><button data-pl="${esc(p.id)}">${icon("list")}
+          <span class="grow"><span class="title">${esc(p.name)}</span><span class="sub">${nCanciones(p.tracks.length)}</span></span>
+          ${p.tracks.some((x) => x.id === t.id) ? `<span class="accent" title="Ya está">${icon("check")}</span>` : ""}
+        </button></li>`).join("")}
+    </ul>
+    <div class="sheet-actions"><button class="text-btn" data-close>Cerrar</button></div>`);
+  $("#sheet-body").onclick = (e) => {
+    if (e.target.closest("[data-new]")) return askName("Nueva lista", "", "Crear y añadir", (name) => createPlaylist(name, t));
+    const b = e.target.closest("[data-pl]");
+    if (b) { closeSheet(); addToPlaylist(b.dataset.pl, t); }
+  };
+}
+renderAll();

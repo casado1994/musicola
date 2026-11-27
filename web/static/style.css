@@ -102,3 +102,51 @@ button svg { width: 24px; height: 24px; fill: currentColor; display: block; }
 
 /* El volumen solo en escritorio: en móvil se usan los botones del teléfono */
 @media (hover: none) and (pointer: coarse) { .volume { display: none; } }
+
+/* Listas de reproducción */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { white-space: nowrap; }
+.accent, .text-btn.accent { color: var(--accent); }
+.pl-cover { width: 48px; height: 48px; border-radius: 6px; background: var(--panel); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; cursor: pointer; }
+.pl-cover img { width: 48px !important; height: 48px !important; border-radius: 0 !important; }
+.pl-cover svg { width: 24px; height: 24px; fill: currentColor; }
+.pl-head { display: flex; align-items: center; gap: 4px; padding: 8px 12px 0 4px; }
+.pl-title { flex: 1; min-width: 0; }
+#pl-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pl-count { color: var(--muted); font-size: 12px; }
+#pl-back { color: var(--text); }
+
+.menu { position: fixed; z-index: 30; min-width: 220px; background: #222229; border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.menu.hidden { display: none; }
+.menu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 6px; text-align: left; }
+.menu button:hover { background: var(--line); }
+.menu svg { width: 20px; height: 20px; color: var(--muted); }
+
+.sheet { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.sheet.hidden { display: none; }
+.sheet-body { width: 100%; max-width: 380px; max-height: 80vh; overflow-y: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.sheet-body h2 { margin: 0 0 4px; font-size: 18px; }
+.sheet-sub { color: var(--muted); font-size: 13px; margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#name-input { width: 100%; margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font-size: 16px; outline: none; }
+#name-input:focus { border-color: var(--accent); }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sheet-list { list-style: none; margin: 0; padding: 0; }
+.sheet-list button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 8px; text-align: left; }
+.sheet-list button:hover { background: var(--line); }
+.sheet-list svg { width: 22px; height: 22px; color: var(--muted); flex-shrink: 0; }
+.sheet-list .accent svg { color: var(--accent); }
+.sheet-list .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sheet-list .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-list .sub { color: var(--muted); font-size: 12px; }
+
+.toast { position: fixed; left: 50%; bottom: calc(170px + env(safe-area-inset-bottom)); transform: translate(-50%, 10px);
+  background: #2a2a31; color: var(--text); padding: 8px 14px; border-radius: 999px; font-size: 14px; z-index: 50;
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+#btn-addlist { color: var(--muted); }
+#btn-addlist:hover { color: var(--text); }
