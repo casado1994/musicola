@@ -1,5 +1,7 @@
 package com.musicola.app.ui
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -74,6 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -301,6 +305,7 @@ private fun Hint(text: String) {
 @Composable
 private fun PlayerBar(vm: PlayerViewModel) {
     val t = vm.current ?: return
+    val context = LocalContext.current
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
 
@@ -317,6 +322,9 @@ private fun PlayerBar(vm: PlayerViewModel) {
             Column(Modifier.weight(1f)) {
                 Text(t.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(t.artist, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = { shareTrack(context, t) }) {
+                Icon(Icons.Default.Share, "Compartir canción", tint = Muted, modifier = Modifier.size(22.dp))
             }
             FavAction(vm, t)
         }
@@ -365,6 +373,24 @@ private fun PlayerBar(vm: PlayerViewModel) {
             }
         }
     }
+}
+
+/**
+ * Abre el menú de compartir de Android con la canción. Se comparte el enlace de YouTube,
+ * que funciona para cualquiera; quien tenga Musicola puede abrirlo con "Compartir → Musicola".
+ */
+private fun shareTrack(context: Context, t: Track) {
+    val text = buildString {
+        append(t.title)
+        if (t.artist.isNotBlank()) append(" – ").append(t.artist)
+        append("\nhttps://youtu.be/").append(t.id)
+    }
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, t.title)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(send, "Compartir canción").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 private fun fmt(ms: Long): String {
