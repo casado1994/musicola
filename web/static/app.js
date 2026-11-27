@@ -195,6 +195,7 @@ function togglePlay() {
 // ---------- Media Session (pantalla de bloqueo, auriculares, teclas multimedia) ----------
 function updateMediaSession(t) {
   if (!("mediaSession" in navigator) || !t) return;
+  setupMediaButtons();
   navigator.mediaSession.metadata = new MediaMetadata({
     title: t.title, artist: t.channel,
     artwork: [
@@ -203,20 +204,24 @@ function updateMediaSession(t) {
     ],
   });
 }
-if ("mediaSession" in navigator) {
+// Botones de la pantalla de bloqueo / CarPlay. Safari en iOS los olvida a veces al cambiar de
+// canción y vuelve a poner «−10 s / +10 s», así que se registran de nuevo con cada canción.
+function setupMediaButtons() {
+  if (!("mediaSession" in navigator)) return;
   const ms = navigator.mediaSession;
-  ms.setActionHandler("play", () => audio.play());
-  ms.setActionHandler("pause", () => audio.pause());
-  ms.setActionHandler("previoustrack", prev);
-  ms.setActionHandler("nexttrack", () => next());
-  try { ms.setActionHandler("seekto", (d) => { audio.currentTime = d.seekTime; }); } catch {}
-  // En iPhone (pantalla de bloqueo y CarPlay) y en Android, si existen los botones de ±10 s
-  // sustituyen a «anterior / siguiente canción». En móvil solo se dejan los de cambiar canción;
-  // en escritorio se mantienen (las teclas multimedia del teclado usan los dos).
+  const set = (action, fn) => { try { ms.setActionHandler(action, fn); } catch {} };
+  set("play", () => audio.play());
+  set("pause", () => audio.pause());
+  set("previoustrack", () => prev());
+  set("nexttrack", () => next());
+  set("seekto", (d) => { audio.currentTime = d.seekTime; });
+  // En móvil (iPhone, CarPlay, Android) los botones de ±10 s sustituyen a «anterior / siguiente»:
+  // solo se dejan en escritorio, donde no molestan.
   const mobile = IS_APPLE_WEBKIT || matchMedia("(hover: none) and (pointer: coarse)").matches;
-  try { ms.setActionHandler("seekbackward", mobile ? null : (d) => { audio.currentTime -= d.seekOffset || 10; }); } catch {}
-  try { ms.setActionHandler("seekforward", mobile ? null : (d) => { audio.currentTime += d.seekOffset || 10; }); } catch {}
+  set("seekbackward", mobile ? null : (d) => { audio.currentTime -= d.seekOffset || 10; });
+  set("seekforward", mobile ? null : (d) => { audio.currentTime += d.seekOffset || 10; });
 }
+setupMediaButtons();
 
 
 // ---------- Eventos del audio ----------
@@ -235,6 +240,7 @@ audio.addEventListener("loadstart", () => { if (audio.getAttribute("src")) setLo
 audio.addEventListener("waiting", () => setLoading(true));
 audio.addEventListener("playing", () => {
   setLoading(false);
+  setupMediaButtons(); // iOS: asegura ⏮ ⏭ en la pantalla de bloqueo una vez que suena
   const t = current();
   if (t && state.played[state.played.length - 1] !== t.id) { state.played.push(t.id); persist(); }
   if (state.radio) extendRadio();
